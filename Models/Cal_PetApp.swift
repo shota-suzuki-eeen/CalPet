@@ -6,12 +6,15 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct Cal_PetApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
         }
+        // ✅ TodayPhotoEntry を追加
+        .modelContainer(for: [AppState.self, TodayPhotoEntry.self])
     }
 }
