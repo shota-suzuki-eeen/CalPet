@@ -10,6 +10,7 @@ import SwiftData
 
 struct ZukanView: View {
     @Query private var appStates: [AppState]
+    @StateObject private var viewModel = ZukanViewModel()
 
     private var state: AppState? { appStates.first }
 
@@ -23,7 +24,7 @@ struct ZukanView: View {
 
                 // ✅ 準備中のまま。ただ、所持キャラが見えると今後の拡張が楽になる
                 if let state {
-                    OwnedPetsPreview(state: state)
+                    OwnedPetsPreview(rows: viewModel.makePetRows(state: state))
                         .padding(.top, 8)
                 } else {
                     Text("（準備中）")
@@ -37,28 +38,24 @@ struct ZukanView: View {
 }
 
 private struct OwnedPetsPreview: View {
-    let state: AppState
-
-    private var owned: [String] {
-        state.ownedPetIDs()
-    }
+    let rows: [ZukanPetRow]
 
     var body: some View {
         VStack(spacing: 10) {
             Text("所持キャラ")
                 .font(.headline)
 
-            if owned.isEmpty {
+            if rows.isEmpty {
                 Text("（未取得）")
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 6) {
-                    ForEach(owned, id: \.self) { id in
+                    ForEach(rows) { row in
                         HStack {
-                            Text(petName(for: id))
+                            Text(row.name)
                                 .font(.body.weight(.semibold))
                             Spacer()
-                            if id == state.currentPetID {
+                            if row.isCurrentPet {
                                 Text("育成中")
                                     .font(.caption.weight(.bold))
                                     .padding(.horizontal, 10)
@@ -81,9 +78,5 @@ private struct OwnedPetsPreview: View {
                 .padding(.top, 6)
         }
         .frame(maxWidth: .infinity)
-    }
-
-    private func petName(for id: String) -> String {
-        PetMaster.all.first(where: { $0.id == id })?.name ?? id
     }
 }
