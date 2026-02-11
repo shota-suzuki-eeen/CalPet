@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 
 struct ShopFoodItem: Codable, Identifiable, Equatable {
     let id: String
