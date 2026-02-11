@@ -11,8 +11,7 @@ import UIKit
 
 struct MemoriesView: View {
     @Query(sort: \TodayPhotoEntry.date, order: .reverse) private var entries: [TodayPhotoEntry]
-    @State private var selected: TodayPhotoEntry?
-    @State private var selectedImage: UIImage?
+    @StateObject private var viewModel = MemoriesViewModel()
 
     var body: some View {
         ZStack {
@@ -34,10 +33,9 @@ struct MemoriesView: View {
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                             ForEach(entries) { e in
-                                MemoryTile(entry: e)
+                                MemoryTile(entry: e, label: viewModel.labelText(for: e.date))
                                     .onTapGesture {
-                                        selected = e
-                                        selectedImage = TodayPhotoStorage.loadImage(fileName: e.fileName)
+                                        viewModel.select(entry: e)
                                     }
                             }
                         }
@@ -48,22 +46,15 @@ struct MemoriesView: View {
         }
         .navigationTitle("思い出")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $selected) { e in
-            MemoryDetail(entry: e, image: selectedImage)
+        .sheet(item: $viewModel.selectedEntry) { e in
+            MemoryDetail(entry: e, image: viewModel.selectedImage, titleText: viewModel.labelText(for: e.date))
         }
     }
 }
 
 private struct MemoryTile: View {
     let entry: TodayPhotoEntry
-
-    private var label: String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ja_JP")
-        f.timeZone = .current
-        f.dateFormat = "yyyy/MM/dd"
-        return f.string(from: entry.date)
-    }
+    let label: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -95,16 +86,9 @@ private struct MemoryTile: View {
 private struct MemoryDetail: View {
     let entry: TodayPhotoEntry
     let image: UIImage?
+    let titleText: String
 
     @Environment(\.dismiss) private var dismiss
-
-    private var titleText: String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ja_JP")
-        f.timeZone = .current
-        f.dateFormat = "yyyy/MM/dd"
-        return f.string(from: entry.date)
-    }
 
     var body: some View {
         NavigationStack {

@@ -15,10 +15,7 @@ struct RootView: View {
     @StateObject private var hk = HealthKitManager()
 
     // ✅ 起動時処理が多重実行されないようにする
-    @State private var didBoot: Bool = false
-
-    // ✅ ここで単一のAppState参照を保持して全画面で共有する
-    @State private var sharedState: AppState?
+    @StateObject private var viewModel = RootViewModel()
 
     // ✅ BGM（App側でenvironmentObject注入している前提）
     @EnvironmentObject private var bgmManager: BGMManager
@@ -31,7 +28,7 @@ struct RootView: View {
             switch hk.authState {
             case .unknown:
                 AuthRequestView(
-                    onAuthorize: { Task { await startAuthorizationIfNeeded() } },
+                    onAuthorize: { Task { await viewModel.startAuthorizationIfNeeded(hk: hk) } },
                     errorMessage: hk.errorMessage
                 )
 
@@ -39,7 +36,7 @@ struct RootView: View {
                 DeniedView()
 
             case .authorized:
-                if let sharedState {
+                if let sharedState = viewModel.sharedState {
                     // ✅ 重要：引数順は state → hk
                     HomeView(state: sharedState, hk: hk)
                 } else {
@@ -48,25 +45,12 @@ struct RootView: View {
             }
         }
         .task {
-            // ✅ 起動時にAppStateを必ず1件用意（最初に確定させる）
-            let state = ensureAppState()
-            sharedState = state
-            state.ensureInitialPetsIfNeeded()
-
-            // ✅ 起動処理は1回だけ
-            guard !didBoot else { return }
-            didBoot = true
-
-            // ✅ 日跨ぎリセット（お世話系のフラグ・広告回数など）
-            // Home/Shopのどちらから開いても整合が取れるようにRootで先に整える
-            state.ensureDailyResetIfNeeded(now: Date())
-            do { try modelContext.save() } catch { }
-
-            // ✅ まだ未判定なら許可リクエスト（ここで自動で出す）
-            await startAuthorizationIfNeeded()
-
-            // ✅ BGM開始（App側でもonAppearで呼んでいるが、冪等なら重複OK）
-            bgmManager.startIfNeeded()
+            await viewModel.bootIfNeeded(
+                appStates: appStates,
+                modelContext: modelContext,
+                hk: hk,
+                bgmManager: bgmManager
+            )
         }
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {
@@ -85,24 +69,6 @@ struct RootView: View {
         }
     }
 
-    // MARK: - Authorization
-
-    @MainActor
-    private func startAuthorizationIfNeeded() async {
-        guard hk.authState == .unknown else { return }
-        await hk.requestAuthorization()
-    }
-
-    // MARK: - AppState（単一レコード運用）
-
-    private func ensureAppState() -> AppState {
-        if let first = appStates.first { return first }
-
-        let created = AppState()
-        modelContext.insert(created)
-        do { try modelContext.save() } catch { }
-        return created
-    }
 }
 
 // MARK: - Shared views
