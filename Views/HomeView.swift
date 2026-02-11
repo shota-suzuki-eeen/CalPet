@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import UIKit
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
@@ -70,12 +71,25 @@ struct HomeView: View {
     @State private var ticketOpacity: Double = 0.0
     @State private var getOpacity: Double = 0.0
 
-    // ✅ get 回転用
+    // ✅ get 回転用（get_a / get_b 共通の角度。get_b は逆回転で表示）
     @State private var getRotation: Double = 0.0
 
     // ✅ ごはん棚
     @State private var showFoodShelf: Bool = false
-    @State private var selectedFoodId: String? = nil
+
+    // ✅ ドロップターゲット演出（必要なら将来使える）
+    @State private var isDropTargeted: Bool = false
+
+    // =========================================================
+    // ✅ キャラクターアニメ（仕様追加：アイドルまばたき / タップジャンプ）
+    // =========================================================
+    @State private var characterAssetName: String = "purpor"
+
+    /// アイドリング（まばたき）用ループTask
+    @State private var idleLoopTask: Task<Void, Never>?
+
+    /// タップアクション（ジャンプ）中フラグ（アイドリング停止）
+    @State private var isCharacterActionRunning: Bool = false
 
     // MARK: - Layout（ここだけ触ればUI調整しやすい）
     // ✅ ここを private -> fileprivate に変更（KcalRing から参照できるようにする）
@@ -122,9 +136,9 @@ struct HomeView: View {
         static let bottomHorizontalPadding: CGFloat = 14
 
         // ===== ごはん棚 =====
-        static let foodShelfHeight: CGFloat = 70
+        static let foodShelfHeight: CGFloat = 45
         static let foodShelfHorizontalPadding: CGFloat = 18
-        static let foodShelfBottomGapFromButtons: CGFloat = 92  // BottomButtons からの上方向オフセット
+        static let foodShelfBottomGapFromButtons: CGFloat = 120  // BottomButtons からの上方向オフセット
         static let foodItemSize: CGFloat = 64
 
         // ===== チケット演出 =====
@@ -157,6 +171,8 @@ struct HomeView: View {
 
                 // バナー下のステージ
                 GeometryReader { geo in
+                    let characterWidth = min(geo.size.width * 0.62, Layout.characterMaxWidth)
+
                     ZStack {
                         // 背景
                         Layout.bgColor.ignoresSafeArea()
@@ -164,14 +180,56 @@ struct HomeView: View {
                         // =========================
                         // 1) キャラクター（中央）
                         // =========================
-                        Image("purpor")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(
-                                maxWidth: min(geo.size.width * 0.62, Layout.characterMaxWidth)
-                            )
-                            .offset(y: Layout.characterTopOffset)
-                            .allowsHitTesting(false)
+                        ZStack {
+                            // ✅ ドロップ判定 + タップ判定（ここがキャラの当たり判定）
+                            Rectangle()
+                                .fill(Color.black.opacity(0.001)) // 0 だと不安定なことがある
+                                .frame(width: characterWidth, height: characterWidth * 1.15)
+                                .offset(y: Layout.characterTopOffset)
+                                .zIndex(50)
+                                // ✅ タップ時：ジャンプ（アイドル停止）
+                                .highPriorityGesture(
+                                    TapGesture().onEnded {
+                                        triggerCharacterJump()
+                                    }
+                                )
+                                .onDrop(
+                                    of: [UTType.plainText.identifier, UTType.text.identifier],
+                                    isTargeted: $isDropTargeted
+                                ) { providers in
+                                    guard let provider = providers.first else { return false }
+
+                                    // 文字列として取り出す（FoodItemCell の draggable(food.id) を想定）
+                                    provider.loadItem(
+                                        forTypeIdentifier: UTType.plainText.identifier,
+                                        options: nil
+                                    ) { item, _ in
+                                        let id: String? = {
+                                            if let s = item as? String { return s }
+                                            if let data = item as? Data, let s = String(data: data, encoding: .utf8) { return s }
+                                            if let url = item as? URL { return url.absoluteString }
+                                            return nil
+                                        }()
+
+                                        guard let foodId = id else { return }
+
+                                        DispatchQueue.main.async {
+                                            _ = handleFoodDrop(foodId: foodId, state: state)
+                                        }
+                                    }
+
+                                    // 受け入れは即 true（処理は非同期）
+                                    return true
+                                }
+
+                            // ✅ 表示するキャラ画像を差し替え（アニメ用）
+                            Image(characterAssetName)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: characterWidth)
+                                .offset(y: Layout.characterTopOffset)
+                                .allowsHitTesting(false) // タッチ判定は上のRectが担当
+                        }
 
                         // ==================================
                         // 2) 左上：なかよし度 + 所持kcal
@@ -227,23 +285,15 @@ struct HomeView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
 
                         // =========================
-                        // 4.5) ごはん棚
+                        // 4.5) ごはん棚（テロップ外タップで閉じる／棚上は閉じない）
                         // =========================
                         if showFoodShelf {
-                            FoodShelfPanel(
-                                state: state,
-                                selectedFoodId: $selectedFoodId,
-                                onGive: { giveSelectedFood(state: state) },
-                                onClose: {
-                                    withAnimation(.easeInOut(duration: 0.18)) {
-                                        showFoodShelf = false
-                                    }
-                                }
-                            )
-                            .padding(.horizontal, Layout.foodShelfHorizontalPadding)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                            .padding(.bottom, Layout.bottomPadding + Layout.foodShelfBottomGapFromButtons)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            FoodShelfPanel(state: state)
+                                .padding(.horizontal, Layout.foodShelfHorizontalPadding)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                                .padding(.bottom, Layout.bottomPadding + Layout.foodShelfBottomGapFromButtons)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                                .onTapGesture { } // ✅ 棚の上タップは「背景タップ」に伝播させない
                         }
 
                         // =========================
@@ -285,12 +335,22 @@ struct HomeView: View {
                                     .onTapGesture { dismissTicketOverlay() }
 
                                 ZStack {
-                                    Image("get")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(maxWidth: min(geo.size.width * 0.78, Layout.getMaxWidth))
-                                        .opacity(getOpacity)
-                                        .rotationEffect(.degrees(getRotation))
+                                    // ✅ get → get_a に置換 + get_b を重ねて逆回転
+                                    ZStack {
+                                        Image("get_a")
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(maxWidth: min(geo.size.width * 0.78, Layout.getMaxWidth))
+                                            .opacity(getOpacity)
+                                            .rotationEffect(.degrees(getRotation))
+
+                                        Image("get_b")
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(maxWidth: min(geo.size.width * 0.78, Layout.getMaxWidth))
+                                            .opacity(getOpacity)
+                                            .rotationEffect(.degrees(getRotation * 0.85))
+                                    }
 
                                     Image("ticket")
                                         .resizable()
@@ -310,6 +370,14 @@ struct HomeView: View {
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                             .transition(.opacity)
+                        }
+                    }
+                    // ✅ ステージ背景タップで閉じる（全画面透明レイヤーは使わない＝D&Dを邪魔しない）
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard showFoodShelf else { return }
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showFoodShelf = false
                         }
                     }
                     // Toast
@@ -376,10 +444,6 @@ struct HomeView: View {
             displayedTodayKcal = todayKcal
             displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
 
-            // ✅ 重要：ここで displayedWalletKcal を state.walletKcal に合わせない
-            // - ショップ滞在中にバックグラウンド→復帰した場合でも
-            //   Homeに戻った瞬間に「差分カウントダウン演出」を成立させるため
-
             handleDayRolloverIfNeeded(state: state)
 
             Task {
@@ -411,11 +475,11 @@ struct HomeView: View {
             )
             .presentationDetents([.medium])
         }
-        // ✅ Homeに戻ってきたとき
-        // - リングは「増加のみ」でOK（現状維持）
-        // - 通貨は「ショップで減ってたらカウントダウン（振動あり）」する
         .onAppear {
             isHomeVisible = true
+
+            // ✅ キャラのアイドルアニメ開始（Home表示中のみ）
+            startCharacterIdleLoopIfNeeded()
 
             // リングは即追従（演出は増加時のみ runSync 側）
             withAnimation(.easeOut(duration: 0.25)) {
@@ -429,6 +493,11 @@ struct HomeView: View {
             isHomeVisible = false
             // 念のため、Home離脱時に振動停止
             Haptics.stopRattle()
+
+            // ✅ キャラアニメ停止
+            stopCharacterIdleLoop()
+            isCharacterActionRunning = false
+            characterAssetName = "purpor"
         }
         // ✅ wallet が裏で更新された場合も追従（ショップ購入など）
         .onChange(of: state.walletKcal) { _, _ in
@@ -445,6 +514,143 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - キャラクターアニメ制御
+
+    /// ✅ Home表示中：ランダムタイミングで「まばたき」を繰り返す
+    private func startCharacterIdleLoopIfNeeded() {
+        guard idleLoopTask == nil else { return }
+
+        idleLoopTask = Task {
+            // 画面が出た直後に即パチパチしないよう、少し待つ
+            try? await Task.sleep(nanoseconds: 600_000_000)
+
+            while !Task.isCancelled {
+                // Homeが見えていないなら待機
+                if !isHomeVisible {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    continue
+                }
+
+                // ジャンプ中はアイドルしない
+                if isCharacterActionRunning {
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    continue
+                }
+
+                // ランダム待機（まばたき間隔）
+                let wait = Double.random(in: 2.2...6.0)
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+
+                // 途中で条件が変わったらスキップ
+                if Task.isCancelled { break }
+                if !isHomeVisible { continue }
+                if isCharacterActionRunning { continue }
+
+                await playBlink()
+            }
+        }
+    }
+
+    private func stopCharacterIdleLoop() {
+        idleLoopTask?.cancel()
+        idleLoopTask = nil
+    }
+
+    private func triggerCharacterJump() {
+        // Home外/ジャンプ多重を防止
+        guard isHomeVisible else { return }
+        guard !isCharacterActionRunning else { return }
+
+        Task { await playJump() }
+    }
+
+    /// まばたき（purpor_idle_blink_0001 -> 0002 -> 0003 -> purpor）
+    private func playBlink() async {
+        guard isHomeVisible else { return }
+        guard !isCharacterActionRunning else { return }
+
+        await MainActor.run { characterAssetName = "purpor_idle_blink_0001" }
+        try? await Task.sleep(nanoseconds: 70_000_000)
+
+        // 途中でジャンプが入ったら中断
+        if isCharacterActionRunning || !isHomeVisible { return }
+
+        await MainActor.run { characterAssetName = "purpor_idle_blink_0002" }
+        try? await Task.sleep(nanoseconds: 60_000_000)
+
+        if isCharacterActionRunning || !isHomeVisible { return }
+
+        await MainActor.run { characterAssetName = "purpor_idle_blink_0003" }
+        try? await Task.sleep(nanoseconds: 70_000_000)
+
+        if isCharacterActionRunning || !isHomeVisible { return }
+
+        await MainActor.run { characterAssetName = "purpor" }
+    }
+
+    /// ジャンプ（purpor_tap_0001 -> 0002(長め) -> 0003 -> purpor）
+    private func playJump() async {
+        guard isHomeVisible else { return }
+        guard !isCharacterActionRunning else { return }
+
+        await MainActor.run {
+            isCharacterActionRunning = true
+            characterAssetName = "purpor_tap_0001"
+        }
+        try? await Task.sleep(nanoseconds: 80_000_000)
+
+        // ✅ ジャンプ中：少し長く表示
+        await MainActor.run { characterAssetName = "purpor_tap_0002" }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        await MainActor.run { characterAssetName = "purpor_tap_0003" }
+        try? await Task.sleep(nanoseconds: 90_000_000)
+
+        await MainActor.run {
+            characterAssetName = "purpor"
+            isCharacterActionRunning = false
+        }
+    }
+
+    // MARK: - Drag & Drop（ごはんをドロップして「あげる」）
+
+    /// ✅ キャラにドロップされた時の処理（成功したら true）
+    /// - 触覚フィードバックは入れない（要件）
+    private func handleFoodDrop(foodId: String, state: AppState) -> Bool {
+        guard let food = FoodCatalog.byId(foodId) else {
+            toast("ご飯が見つかりません")
+            return false
+        }
+
+        let check = state.canFeedNow(now: Date())
+        guard check.can, let slot = check.slot else {
+            toast(check.reason ?? "今はご飯できません")
+            return false
+        }
+
+        guard state.foodCount(foodId: foodId) > 0 else {
+            toast("そのご飯は所持していません")
+            return false
+        }
+
+        let ok = state.consumeFood(foodId: foodId, count: 1)
+        guard ok else {
+            toast("消費に失敗しました")
+            return false
+        }
+
+        state.setFed(slot: slot, value: true)
+        save()
+
+        addFriendshipWithAnimation(points: 10, state: state)
+        toast("\(food.name)をあげた！ +10")
+
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showFoodShelf = false
+        }
+        return true
+    }
+
     // MARK: - UI helpers
 
     /// ✅ 進捗は「1周目=0..1、2周目以降=1..2..」の raw を返す（リング側で描き分ける）
@@ -457,36 +663,28 @@ struct HomeView: View {
     /// - 減少：カウントダウン演出（振動あり）
     /// - 増加：基本は runSync の gain 演出でやる（ここでは即追従）
     private func reconcileWalletDisplayIfNeeded(state: AppState) async {
-        // Homeが見えていない時は演出しない（ショップ内で減ってもHome復帰時にやる）
         guard isHomeVisible else { return }
-
-        // gain演出中は触らない
         guard !isAnimatingGain else { return }
 
         let target = state.walletKcal
 
-        // 減少（ショップ消費）
         if displayedWalletKcal > target {
             await playWalletCountDownAnimation(from: displayedWalletKcal, to: target)
             return
         }
 
-        // 増加や同値：ここでは即追従（増加演出は runSync 側）
         if displayedWalletKcal != target {
             await MainActor.run { displayedWalletKcal = target }
         }
     }
 
-    /// ✅ ショップ消費などの「減少」をカウントダウン演出（Homeのみ）
-    /// - 数字が減っていく
-    /// - 振動も軽く連動
     private func playWalletCountDownAnimation(from: Int, to: Int) async {
         guard isHomeVisible else { return }
         guard from > to else { return }
         guard !isAnimatingGain else { return }
 
         let magnitude = from - to
-        let duration = min(1.2, max(0.25, Double(magnitude) * 0.006)) // 例：-100で0.6sくらい
+        let duration = min(1.2, max(0.25, Double(magnitude) * 0.006))
 
         let fps: Double = 60
         let frames = max(1, Int(duration * fps))
@@ -496,11 +694,10 @@ struct HomeView: View {
         }
 
         for i in 0...frames {
-            // 途中でHomeが消えたら即終了
             if !isHomeVisible { break }
 
             let t = Double(i) / Double(frames)
-            let eased = 1 - pow(1 - t, 3) // easeOut
+            let eased = 1 - pow(1 - t, 3)
 
             let v = from - Int(Double(magnitude) * eased)
 
@@ -675,56 +872,6 @@ struct HomeView: View {
         withAnimation(.easeInOut(duration: 0.18)) {
             showFoodShelf.toggle()
         }
-
-        if showFoodShelf, selectedFoodId == nil {
-            selectedFoodId = state.firstOwnedFoodId(from: FoodCatalog.all.map { $0.id })
-        }
-    }
-
-    private func giveSelectedFood(state: AppState) {
-        guard let id = selectedFoodId, let food = FoodCatalog.byId(id) else {
-            toast("ご飯を選んでね")
-            Task { @MainActor in
-                Haptics.rattle(duration: 0.12, style: .light)
-            }
-            return
-        }
-
-        let check = state.canFeedNow(now: Date())
-        guard check.can, let slot = check.slot else {
-            toast(check.reason ?? "ご飯できません")
-            Task { @MainActor in
-                Haptics.rattle(duration: 0.12, style: .light)
-            }
-            return
-        }
-
-        guard state.foodCount(foodId: id) > 0 else {
-            toast("そのご飯は所持していません")
-            Task { @MainActor in
-                Haptics.rattle(duration: 0.12, style: .light)
-            }
-            return
-        }
-
-        let ok = state.consumeFood(foodId: id, count: 1)
-        guard ok else {
-            toast("消費に失敗しました")
-            Task { @MainActor in
-                Haptics.rattle(duration: 0.12, style: .light)
-            }
-            return
-        }
-
-        state.setFed(slot: slot, value: true)
-        save()
-
-        addFriendshipWithAnimation(points: 10, state: state)
-        toast("\(food.name)をあげた！ +10")
-
-        withAnimation(.easeInOut(duration: 0.18)) {
-            showFoodShelf = false
-        }
     }
 
     private func onTapBath(state: AppState) {
@@ -867,10 +1014,6 @@ struct HomeView: View {
         lastTodayKcal = todayKcal
     }
 
-    /// ✅ 起動/復帰時の「差分kcal加算」を演出付きで反映する
-    /// - リング：伸びる（1周目白 / 2周目以降は緑）
-    /// - 通貨：ダラララ増える（表示も増やす）
-    /// - 振動：増加演出中は連続
     private func playGainAnimationIfNeeded(
         state: AppState,
         fromDisplayedTodayKcal: Int,
@@ -887,7 +1030,6 @@ struct HomeView: View {
 
         isAnimatingGain = true
 
-        // ✅ 先に wallet を実値としては反映（購入可能にしておく）
         if deltaWallet > 0 {
             state.pendingKcal = 0
             state.walletKcal = targetWallet
@@ -1013,7 +1155,7 @@ private struct WalletCapsule: View {
 }
 
 private struct KcalRing: View {
-    let progress: Double              // ✅ 1.0超え可
+    let progress: Double
     let currentKcal: Int
     let goalKcal: Int
 
@@ -1024,12 +1166,10 @@ private struct KcalRing: View {
         goalKcal > 0 ? "\(goalKcal)" : "—"
     }
 
-    /// 1周目（白）
     private var lap1: CGFloat {
         CGFloat(min(1.0, max(0.0, progress)))
     }
 
-    /// 2周目（緑）: progress-1 を 0..1 に丸める
     private var lap2: CGFloat {
         let v = progress - 1.0
         return CGFloat(min(1.0, max(0.0, v)))
@@ -1047,7 +1187,6 @@ private struct KcalRing: View {
                 .foregroundStyle(.white)
                 .frame(width: innerSize, height: innerSize)
 
-            // ✅ 1周目（白）
             Circle()
                 .trim(from: 0, to: lap1)
                 .stroke(style: StrokeStyle(lineWidth: 14, lineCap: .round))
@@ -1056,7 +1195,6 @@ private struct KcalRing: View {
                 .frame(width: innerSize, height: innerSize)
                 .animation(.easeOut(duration: 0.55), value: lap1)
 
-            // ✅ 2周目（緑）
             if lap2 > 0 {
                 Circle()
                     .trim(from: 0, to: lap2)
@@ -1124,7 +1262,6 @@ private struct RightSideButtons: View {
                     .frame(width: buttonSize, height: buttonSize)
             }
 
-            // ✅ 同一stateを渡す
             NavigationLink { ShopView(state: state) } label: {
                 Image("shop_button")
                     .resizable()
@@ -1265,14 +1402,10 @@ private struct GoalSettingSheet: View {
     }
 }
 
-// MARK: - ごはん棚
+// MARK: - ごはん棚（仕様変更版）
 
 private struct FoodShelfPanel: View {
     let state: AppState
-    @Binding var selectedFoodId: String?
-
-    let onGive: () -> Void
-    let onClose: () -> Void
 
     private var ownedFoods: [FoodCatalog.FoodItem] {
         FoodCatalog.all.filter { state.foodCount(foodId: $0.id) > 0 }
@@ -1280,65 +1413,32 @@ private struct FoodShelfPanel: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color.white.opacity(0.22))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.black.opacity(0.85), lineWidth: 3)
-                )
+            // ✅ 土台：gohan_telop（枠線なし）
+            Image("gohan_telop")
+                .resizable()
+                .scaledToFill()
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .clipped()
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("所持しているご飯")
-                        .font(.system(size: 18, weight: .heavy))
-                        .foregroundStyle(Color.red)
-
-                    Spacer()
-
-                    Button(action: onClose) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(.black.opacity(0.7))
-                    }
-                }
-
-                if ownedFoods.isEmpty {
-                    Text("ご飯がありません（ショップで購入してください）")
-                        .font(.footnote)
-                        .foregroundStyle(.black.opacity(0.75))
-                        .padding(.top, 6)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(ownedFoods) { food in
-                                FoodItemCell(
-                                    food: food,
-                                    count: state.foodCount(foodId: food.id),
-                                    isSelected: selectedFoodId == food.id,
-                                    onTap: { selectedFoodId = food.id }
-                                )
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-
-                    HStack {
-                        Spacer()
-
-                        Button(action: onGive) {
-                            Text("あげる")
-                                .font(.system(size: 16, weight: .heavy))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                                .background(Color.black.opacity(0.85))
-                                .clipShape(Capsule())
+            if ownedFoods.isEmpty {
+                Text("ご飯がありません（ショップで購入してください）")
+                    .font(.footnote)
+                    .foregroundStyle(.black.opacity(0.75))
+                    .padding(.horizontal, 12)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(ownedFoods) { food in
+                            FoodItemCell(
+                                food: food,
+                                count: state.foodCount(foodId: food.id)
+                            )
                         }
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
         }
         .frame(height: HomeView.Layout.foodShelfHeight)
     }
@@ -1347,34 +1447,36 @@ private struct FoodShelfPanel: View {
 private struct FoodItemCell: View {
     let food: FoodCatalog.FoodItem
     let count: Int
-    let isSelected: Bool
-    let onTap: () -> Void
 
     var body: some View {
-        Button(action: onTap) {
-            ZStack(alignment: .bottomTrailing) {
-                Image(food.assetName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: HomeView.Layout.foodItemSize, height: HomeView.Layout.foodItemSize)
-                    .padding(8)
-                    .background(Color.white.opacity(0.20))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(isSelected ? Color.red.opacity(0.95) : Color.black.opacity(0.55),
-                                    lineWidth: isSelected ? 3 : 2)
-                    )
+        ZStack(alignment: .bottomTrailing) {
+            Image(food.assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: HomeView.Layout.foodItemSize, height: HomeView.Layout.foodItemSize)
+                .padding(6)
+                .background(Color.white.opacity(0.18))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.black.opacity(0.45), lineWidth: 2)
+                )
+                // ✅ これを掴んでキャラにドロップする（プレビュー付き）
+                .draggable(food.id) {
+                    Image(food.assetName)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: HomeView.Layout.foodItemSize, height: HomeView.Layout.foodItemSize)
+                }
 
-                Text("x\(count)")
-                    .font(.system(size: 12, weight: .heavy))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.black.opacity(0.85))
-                    .clipShape(Capsule())
-                    .padding(6)
-            }
+            Text("x\(count)")
+                .font(.system(size: 12, weight: .heavy))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.85))
+                .clipShape(Capsule())
+                .padding(6)
         }
     }
 }

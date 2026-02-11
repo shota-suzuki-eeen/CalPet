@@ -20,6 +20,12 @@ struct RootView: View {
     // ✅ ここで単一のAppState参照を保持して全画面で共有する
     @State private var sharedState: AppState?
 
+    // ✅ BGM（App側でenvironmentObject注入している前提）
+    @EnvironmentObject private var bgmManager: BGMManager
+
+    // ✅ フォア/バックの監視
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         Group {
             switch hk.authState {
@@ -58,6 +64,24 @@ struct RootView: View {
 
             // ✅ まだ未判定なら許可リクエスト（ここで自動で出す）
             await startAuthorizationIfNeeded()
+
+            // ✅ BGM開始（App側でもonAppearで呼んでいるが、冪等なら重複OK）
+            bgmManager.startIfNeeded()
+        }
+        .onChange(of: scenePhase) { newPhase in
+            switch newPhase {
+            case .active:
+                // ✅ 復帰時に再生が止まっていたら再開
+                bgmManager.startIfNeeded()
+            case .background:
+                // ✅ 常時再生したい場合でも、ここで止めない（仕様：無限ループ再生）
+                // bgmManager.stop() などは実装しても、現仕様では呼ばない
+                break
+            case .inactive:
+                break
+            @unknown default:
+                break
+            }
         }
     }
 
