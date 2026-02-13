@@ -8,7 +8,6 @@
 import SwiftUI
 import SwiftData
 import UIKit
-import PhotosUI
 import UniformTypeIdentifiers
 
 struct HomeView: View {
@@ -41,12 +40,12 @@ struct HomeView: View {
     @State private var showGoalSheet: Bool = false
 
     // ✅ 今日の一枚（撮影ボタンに紐づける）
-    @State private var todayPhotoItem: PhotosPickerItem?
     @State private var todayPhotoImage: UIImage?
     @State private var todayPhotoEntry: TodayPhotoEntry?
 
-    // ✅ 撮影ボタンで開くピッカー制御
-    @State private var showPhotoPicker: Bool = false
+    // ✅ 撮影ボタンで開くキャプチャ画面制御
+    @State private var showCaptureModeDialog: Bool = false
+    @State private var selectedCaptureMode: CameraCaptureView.Mode?
 
     // 軽いトースト（保存完了など）
     @State private var toastMessage: String?
@@ -272,7 +271,7 @@ struct HomeView: View {
                             // 4) 右側：縦ボタン
                             RightSideButtons(
                                 state: state,
-                                onCamera: { showPhotoPicker = true },
+                                onCamera: { showCaptureModeDialog = true },
                                 buttonSize: Layout.rightButtonSize,
                                 spacing: Layout.rightButtonsSpacing
                             )
@@ -387,15 +386,18 @@ struct HomeView: View {
             }
             .navigationBarHidden(true)
         }
-        .photosPicker(
-            isPresented: $showPhotoPicker,
-            selection: $todayPhotoItem,
-            matching: .images,
-            photoLibrary: .shared()
-        )
-        .onChange(of: todayPhotoItem) { _, newValue in
-            guard let newValue else { return }
-            Task { await setTodayPhoto(from: newValue) }
+        .confirmationDialog("撮影モードを選択", isPresented: $showCaptureModeDialog, titleVisibility: .visible) {
+            Button("ARで撮影") { selectedCaptureMode = .ar }
+            Button("通常撮影") { selectedCaptureMode = .plain }
+            Button("キャンセル", role: .cancel) {}
+        }
+        .fullScreenCover(item: $selectedCaptureMode) { mode in
+            CameraCaptureView(initialMode: mode) {
+                selectedCaptureMode = nil
+            } onCapture: { image in
+                saveTodayPhoto(image)
+                selectedCaptureMode = nil
+            }
         }
         .task {
             state.ensureInitialPetsIfNeeded()
@@ -797,14 +799,8 @@ struct HomeView: View {
         }
     }
 
-    private func setTodayPhoto(from item: PhotosPickerItem) async {
+    private func saveTodayPhoto(_ uiImage: UIImage) {
         do {
-            guard let data = try await item.loadTransferable(type: Data.self),
-                  let uiImage = UIImage(data: data) else {
-                toast("画像の読み込みに失敗しました")
-                return
-            }
-
             let key = AppState.makeDayKey(Date())
             let fileName = "\(key).jpg"
 
