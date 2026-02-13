@@ -91,6 +91,10 @@ struct HomeView: View {
     /// タップアクション（ジャンプ）中フラグ（アイドリング停止）
     @State private var isCharacterActionRunning: Bool = false
 
+    // ✅ 仕様追加：たまに2連続まばたき
+    private let doubleBlinkChance: Double = 0.18          // 18%くらいで2連続
+    private let doubleBlinkGapRange: ClosedRange<Double> = 0.18...0.45  // 2回目までの間隔（秒）
+
     // MARK: - Layout（ここだけ触ればUI調整しやすい）
     // ✅ ここを private -> fileprivate に変更（KcalRing から参照できるようにする）
     fileprivate enum Layout {
@@ -121,7 +125,7 @@ struct HomeView: View {
 
         // ===== 中央：キャラクター =====
         static let characterTopOffset: CGFloat = 45
-        static let characterMaxWidth: CGFloat = 160
+        static let characterMaxWidth: CGFloat = 210
 
         // ===== 右側：縦ボタン群 =====
         static let rightButtonsTopOffset: CGFloat = 210
@@ -148,7 +152,7 @@ struct HomeView: View {
 
         // ✅ get_text：チケットの上部に、少し「右＆上」
         static let getTextOffsetX: CGFloat = 11
-        static let getTextOffsetY: CGFloat = -140
+        static let getTextOffsetY: CGFloat = -160
 
         // ✅ get 回転スピード（大きいほどゆっくり）
         static let getRotationDuration: Double = 2.2
@@ -546,7 +550,23 @@ struct HomeView: View {
                 if !isHomeVisible { continue }
                 if isCharacterActionRunning { continue }
 
+                // ✅ 仕様：基本は従来通り「1回まばたき」
+                // ✅ 追加：たまに「2連続まばたき」
+                let doDouble = Double.random(in: 0...1) < doubleBlinkChance
+
                 await playBlink()
+
+                if doDouble {
+                    // 2回目まで少し間を空ける（不自然に連射しない）
+                    let gap = Double.random(in: doubleBlinkGapRange)
+                    try? await Task.sleep(nanoseconds: UInt64(gap * 1_000_000_000))
+
+                    if Task.isCancelled { break }
+                    if !isHomeVisible { continue }
+                    if isCharacterActionRunning { continue }
+
+                    await playBlink()
+                }
             }
         }
     }
