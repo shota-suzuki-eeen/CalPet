@@ -95,13 +95,13 @@ struct HomeView: View {
     // ✅ ここを private -> fileprivate に変更（KcalRing から参照できるようにする）
     fileprivate enum Layout {
         // ===== 全体 =====
-        static let bannerHeight: CGFloat = 76
+        static let bannerHeight: CGFloat = 76   // ✅ “バナーがあった時の高さ”をレイアウト保持に使う（表示はしない）
 
-        // ===== 背景色（狙い画像の水色）=====
-        static let bgColor = Color(red: 0.35, green: 0.86, blue: 0.88)
+        // ✅ 仕様：Home背景画像アセット名
+        static let homeBackgroundAssetName: String = "Home_background"
 
         // ===== 左上：メーター周り =====
-        static let leftTopPaddingTop: CGFloat = 22
+        static let leftTopPaddingTop: CGFloat = 44
         static let leftTopPaddingLeading: CGFloat = 18
         static let meterStackSpacing: CGFloat = 18
 
@@ -114,7 +114,7 @@ struct HomeView: View {
         static let redMinWidth: CGFloat = 18
 
         // ===== 右上：リング =====
-        static let kcalRingTop: CGFloat = 18
+        static let kcalRingTop: CGFloat = 36
         static let kcalRingTrailing: CGFloat = 18
         static let kcalRingSizeOuter: CGFloat = 135
         static let kcalRingSizeInner: CGFloat = 115
@@ -124,7 +124,7 @@ struct HomeView: View {
         static let characterMaxWidth: CGFloat = 160
 
         // ===== 右側：縦ボタン群 =====
-        static let rightButtonsTopOffset: CGFloat = 180
+        static let rightButtonsTopOffset: CGFloat = 210
         static let rightButtonsTrailing: CGFloat = 20
         static let rightButtonSize: CGFloat = 40
         static let rightButtonsSpacing: CGFloat = 18
@@ -132,7 +132,7 @@ struct HomeView: View {
         // ===== 下部：横ボタン群 =====
         static let bottomButtonSize: CGFloat = 60
         static let bottomButtonsSpacing: CGFloat = 14
-        static let bottomPadding: CGFloat = 26
+        static let bottomPadding: CGFloat = 80
         static let bottomHorizontalPadding: CGFloat = 14
 
         // ===== ごはん棚 =====
@@ -163,229 +163,236 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // 上部：バナー広告（ダミー）
-                BannerBar()
-                    .frame(height: Layout.bannerHeight)
-                    .frame(maxWidth: .infinity)
+            ZStack {
+                // ✅ 背景は「画面全体（セーフエリア含む）」に敷く
+                Image(Layout.homeBackgroundAssetName)
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea() // ← 上部の“空白”を確実に消す
 
-                // バナー下のステージ
-                GeometryReader { geo in
-                    let characterWidth = min(geo.size.width * 0.62, Layout.characterMaxWidth)
+                VStack(spacing: 0) {
+                    // ✅ バナーは表示しないが「高さ分の空間」は保持して、既存UI位置を一切ずらさない
+                    Color.clear
+                        .frame(height: Layout.bannerHeight)
+                        .frame(maxWidth: .infinity)
 
-                    ZStack {
-                        // 背景
-                        Layout.bgColor.ignoresSafeArea()
+                    // バナー下のステージ（ここから下は“バナーがあった時と同じ座標系”）
+                    GeometryReader { geo in
+                        let characterWidth = min(geo.size.width * 0.62, Layout.characterMaxWidth)
 
-                        // =========================
-                        // 1) キャラクター（中央）
-                        // =========================
                         ZStack {
-                            // ✅ ドロップ判定 + タップ判定（ここがキャラの当たり判定）
-                            Rectangle()
-                                .fill(Color.black.opacity(0.001)) // 0 だと不安定なことがある
-                                .frame(width: characterWidth, height: characterWidth * 1.15)
-                                .offset(y: Layout.characterTopOffset)
-                                .zIndex(50)
-                                // ✅ タップ時：ジャンプ（アイドル停止）
-                                .highPriorityGesture(
-                                    TapGesture().onEnded {
-                                        triggerCharacterJump()
-                                    }
-                                )
-                                .onDrop(
-                                    of: [UTType.plainText.identifier, UTType.text.identifier],
-                                    isTargeted: $isDropTargeted
-                                ) { providers in
-                                    guard let provider = providers.first else { return false }
-
-                                    // 文字列として取り出す（FoodItemCell の draggable(food.id) を想定）
-                                    provider.loadItem(
-                                        forTypeIdentifier: UTType.plainText.identifier,
-                                        options: nil
-                                    ) { item, _ in
-                                        let id: String? = {
-                                            if let s = item as? String { return s }
-                                            if let data = item as? Data, let s = String(data: data, encoding: .utf8) { return s }
-                                            if let url = item as? URL { return url.absoluteString }
-                                            return nil
-                                        }()
-
-                                        guard let foodId = id else { return }
-
-                                        DispatchQueue.main.async {
-                                            _ = handleFoodDrop(foodId: foodId, state: state)
-                                        }
-                                    }
-
-                                    // 受け入れは即 true（処理は非同期）
-                                    return true
-                                }
-
-                            // ✅ 表示するキャラ画像を差し替え（アニメ用）
-                            Image(characterAssetName)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: characterWidth)
-                                .offset(y: Layout.characterTopOffset)
-                                .allowsHitTesting(false) // タッチ判定は上のRectが担当
-                        }
-
-                        // ==================================
-                        // 2) 左上：なかよし度 + 所持kcal
-                        // ==================================
-                        VStack(alignment: .leading, spacing: Layout.meterStackSpacing) {
-                            FriendshipMeter(
-                                value: displayedFriendship,
-                                maxValue: Double(AppState.friendshipMaxMeter),
-                                barWidth: Layout.barWidth,
-                                height: Layout.capsuleHeight,
-                                iconSize: Layout.iconHeartSize,
-                                redMinWidth: Layout.redMinWidth
-                            )
-
-                            WalletCapsule(
-                                walletKcal: displayedWalletKcal, // ✅ 演出用表示値
-                                barWidth: Layout.walletWidth,
-                                height: Layout.capsuleHeight,
-                                iconSize: Layout.iconCoinSize
-                            )
-
-                            Spacer()
-                        }
-                        .padding(.top, Layout.leftTopPaddingTop)
-                        .padding(.leading, Layout.leftTopPaddingLeading)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                        // =========================
-                        // 3) 右上：消費kcalリング
-                        // =========================
-                        KcalRing(
-                            progress: displayedKcalProgress,     // ✅ 1.0超えを許可（2周目は緑）
-                            currentKcal: displayedTodayKcal,     // ✅ 演出で増える表示
-                            goalKcal: state.dailyGoalKcal,
-                            outerSize: Layout.kcalRingSizeOuter,
-                            innerSize: Layout.kcalRingSizeInner
-                        )
-                        .padding(.top, Layout.kcalRingTop)
-                        .padding(.trailing, Layout.kcalRingTrailing)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-
-                        // =========================
-                        // 4) 右側：縦ボタン群
-                        // =========================
-                        RightSideButtons(
-                            state: state,
-                            onCamera: { showPhotoPicker = true },
-                            buttonSize: Layout.rightButtonSize,
-                            spacing: Layout.rightButtonsSpacing
-                        )
-                        .padding(.top, Layout.rightButtonsTopOffset)
-                        .padding(.trailing, Layout.rightButtonsTrailing)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-
-                        // =========================
-                        // 4.5) ごはん棚（テロップ外タップで閉じる／棚上は閉じない）
-                        // =========================
-                        if showFoodShelf {
-                            FoodShelfPanel(state: state)
-                                .padding(.horizontal, Layout.foodShelfHorizontalPadding)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                                .padding(.bottom, Layout.bottomPadding + Layout.foodShelfBottomGapFromButtons)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
-                                .onTapGesture { } // ✅ 棚の上タップは「背景タップ」に伝播させない
-                        }
-
-                        // =========================
-                        // 5) 下部：横ボタン群（お世話ON表示対応）
-                        // =========================
-                        TimelineView(.periodic(from: .now, by: 60)) { timeline in
-                            let now = timeline.date
-
-                            let canFood = state.canFeedNow(now: now).can
-                            let canBath = state.canBathNow(now: now).can
-                            let canWc = (state.toiletFlagAt != nil)
-                            let canSleep = true
-
-                            BottomButtons(
-                                onSleep: { addFriendshipWithAnimation(points: 5, state: state) },
-                                onBath: { onTapBath(state: state) },
-                                onFood: { onTapFood(state: state) },
-                                onWc: { onTapToilet(state: state) },
-                                onHome: { /* 何もしない */ },
-                                isSleepAvailable: canSleep,
-                                isBathAvailable: canBath,
-                                isFoodAvailable: canFood,
-                                isWcAvailable: canWc,
-                                buttonSize: Layout.bottomButtonSize,
-                                spacing: Layout.bottomButtonsSpacing,
-                                horizontalPadding: Layout.bottomHorizontalPadding
-                            )
-                        }
-                        .padding(.bottom, Layout.bottomPadding)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-
-                        // =========================
-                        // 6) MAX到達：チケット演出（画面中央）
-                        // =========================
-                        if showTicketOverlay {
+                            // =========================
+                            // 1) キャラクター（中央）
+                            // =========================
                             ZStack {
-                                Color.black.opacity(0.001)
-                                    .ignoresSafeArea()
-                                    .onTapGesture { dismissTicketOverlay() }
+                                // ✅ ドロップ判定 + タップ判定（ここがキャラの当たり判定）
+                                Rectangle()
+                                    .fill(Color.black.opacity(0.001)) // 0 だと不安定なことがある
+                                    .frame(width: characterWidth, height: characterWidth * 1.15)
+                                    .offset(y: Layout.characterTopOffset)
+                                    .zIndex(50)
+                                    // ✅ タップ時：ジャンプ（アイドル停止）
+                                    .highPriorityGesture(
+                                        TapGesture().onEnded {
+                                            triggerCharacterJump()
+                                        }
+                                    )
+                                    .onDrop(
+                                        of: [UTType.plainText.identifier, UTType.text.identifier],
+                                        isTargeted: $isDropTargeted
+                                    ) { providers in
+                                        guard let provider = providers.first else { return false }
 
-                                ZStack {
-                                    // ✅ get → get_a に置換 + get_b を重ねて逆回転
-                                    ZStack {
-                                        Image("get_a")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(maxWidth: min(geo.size.width * 0.78, Layout.getMaxWidth))
-                                            .opacity(getOpacity)
-                                            .rotationEffect(.degrees(getRotation))
+                                        // 文字列として取り出す（FoodItemCell の draggable(food.id) を想定）
+                                        provider.loadItem(
+                                            forTypeIdentifier: UTType.plainText.identifier,
+                                            options: nil
+                                        ) { item, _ in
+                                            let id: String? = {
+                                                if let s = item as? String { return s }
+                                                if let data = item as? Data, let s = String(data: data, encoding: .utf8) { return s }
+                                                if let url = item as? URL { return url.absoluteString }
+                                                return nil
+                                            }()
 
-                                        Image("get_b")
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(maxWidth: min(geo.size.width * 0.78, Layout.getMaxWidth))
-                                            .opacity(getOpacity)
-                                            .rotationEffect(.degrees(getRotation * 0.85))
+                                            guard let foodId = id else { return }
+
+                                            DispatchQueue.main.async {
+                                                _ = handleFoodDrop(foodId: foodId, state: state)
+                                            }
+                                        }
+
+                                        // 受け入れは即 true（処理は非同期）
+                                        return true
                                     }
 
-                                    Image("ticket")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(maxWidth: min(geo.size.width * 0.7, Layout.ticketMaxWidth))
-                                        .opacity(ticketOpacity)
-                                        .scaleEffect(ticketScale)
-
-                                    Image("get_text")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .frame(maxWidth: min(geo.size.width * 0.62, Layout.getTextMaxWidth))
-                                        .offset(x: Layout.getTextOffsetX, y: Layout.getTextOffsetY)
-                                        .opacity(ticketOpacity)
-                                        .scaleEffect(ticketScale)
-                                }
+                                // ✅ 表示するキャラ画像を差し替え（アニメ用）
+                                Image(characterAssetName)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: characterWidth)
+                                    .offset(y: Layout.characterTopOffset)
+                                    .allowsHitTesting(false) // タッチ判定は上のRectが担当
                             }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                            .transition(.opacity)
+
+                            // ==================================
+                            // 2) 左上：なかよし度 + 所持kcal
+                            // ==================================
+                            VStack(alignment: .leading, spacing: Layout.meterStackSpacing) {
+                                FriendshipMeter(
+                                    value: displayedFriendship,
+                                    maxValue: Double(AppState.friendshipMaxMeter),
+                                    barWidth: Layout.barWidth,
+                                    height: Layout.capsuleHeight,
+                                    iconSize: Layout.iconHeartSize,
+                                    redMinWidth: Layout.redMinWidth
+                                )
+
+                                WalletCapsule(
+                                    walletKcal: displayedWalletKcal, // ✅ 演出用表示値
+                                    barWidth: Layout.walletWidth,
+                                    height: Layout.capsuleHeight,
+                                    iconSize: Layout.iconCoinSize
+                                )
+
+                                Spacer()
+                            }
+                            .padding(.top, Layout.leftTopPaddingTop)
+                            .padding(.leading, Layout.leftTopPaddingLeading)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+                            // =========================
+                            // 3) 右上：消費kcalリング
+                            // =========================
+                            KcalRing(
+                                progress: displayedKcalProgress,     // ✅ 1.0超えを許可（2周目は緑）
+                                currentKcal: displayedTodayKcal,     // ✅ 演出で増える表示
+                                goalKcal: state.dailyGoalKcal,
+                                outerSize: Layout.kcalRingSizeOuter,
+                                innerSize: Layout.kcalRingSizeInner
+                            )
+                            .padding(.top, Layout.kcalRingTop)
+                            .padding(.trailing, Layout.kcalRingTrailing)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+
+                            // =========================
+                            // 4) 右側：縦ボタン群
+                            // =========================
+                            RightSideButtons(
+                                state: state,
+                                onCamera: { showPhotoPicker = true },
+                                buttonSize: Layout.rightButtonSize,
+                                spacing: Layout.rightButtonsSpacing
+                            )
+                            .padding(.top, Layout.rightButtonsTopOffset)
+                            .padding(.trailing, Layout.rightButtonsTrailing)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+
+                            // =========================
+                            // 4.5) ごはん棚（テロップ外タップで閉じる／棚上は閉じない）
+                            // =========================
+                            if showFoodShelf {
+                                FoodShelfPanel(state: state)
+                                    .padding(.horizontal, Layout.foodShelfHorizontalPadding)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                                    .padding(.bottom, Layout.bottomPadding + Layout.foodShelfBottomGapFromButtons)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                                    .onTapGesture { } // ✅ 棚の上タップは「背景タップ」に伝播させない
+                            }
+
+                            // =========================
+                            // 5) 下部：横ボタン群（お世話ON表示対応）
+                            // =========================
+                            TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                                let now = timeline.date
+
+                                let canFood = state.canFeedNow(now: now).can
+                                let canBath = state.canBathNow(now: now).can
+                                let canWc = (state.toiletFlagAt != nil)
+                                let canSleep = true
+
+                                BottomButtons(
+                                    onSleep: { addFriendshipWithAnimation(points: 5, state: state) },
+                                    onBath: { onTapBath(state: state) },
+                                    onFood: { onTapFood(state: state) },
+                                    onWc: { onTapToilet(state: state) },
+                                    onHome: { /* 何もしない */ },
+                                    isSleepAvailable: canSleep,
+                                    isBathAvailable: canBath,
+                                    isFoodAvailable: canFood,
+                                    isWcAvailable: canWc,
+                                    buttonSize: Layout.bottomButtonSize,
+                                    spacing: Layout.bottomButtonsSpacing,
+                                    horizontalPadding: Layout.bottomHorizontalPadding
+                                )
+                            }
+                            .padding(.bottom, Layout.bottomPadding)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+
+                            // =========================
+                            // 6) MAX到達：チケット演出（画面中央）
+                            // =========================
+                            if showTicketOverlay {
+                                ZStack {
+                                    Color.black.opacity(0.001)
+                                        .ignoresSafeArea()
+                                        .onTapGesture { dismissTicketOverlay() }
+
+                                    ZStack {
+                                        // ✅ get → get_a に置換 + get_b を重ねて逆回転
+                                        ZStack {
+                                            Image("get_a")
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(maxWidth: min(geo.size.width * 0.78, Layout.getMaxWidth))
+                                                .opacity(getOpacity)
+                                                .rotationEffect(.degrees(getRotation))
+
+                                            Image("get_b")
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(maxWidth: min(geo.size.width * 0.78, Layout.getMaxWidth))
+                                                .opacity(getOpacity)
+                                                .rotationEffect(.degrees(getRotation * 0.85))
+                                        }
+
+                                        Image("ticket")
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(maxWidth: min(geo.size.width * 0.7, Layout.ticketMaxWidth))
+                                            .opacity(ticketOpacity)
+                                            .scaleEffect(ticketScale)
+
+                                        Image("get_text")
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(maxWidth: min(geo.size.width * 0.62, Layout.getTextMaxWidth))
+                                            .offset(x: Layout.getTextOffsetX, y: Layout.getTextOffsetY)
+                                            .opacity(ticketOpacity)
+                                            .scaleEffect(ticketScale)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                                .transition(.opacity)
+                            }
                         }
-                    }
-                    // ✅ ステージ背景タップで閉じる（全画面透明レイヤーは使わない＝D&Dを邪魔しない）
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        guard showFoodShelf else { return }
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            showFoodShelf = false
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                        // ✅ ステージ背景タップで閉じる（全画面透明レイヤーは使わない＝D&Dを邪魔しない）
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard showFoodShelf else { return }
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showFoodShelf = false
+                            }
                         }
-                    }
-                    // Toast
-                    .overlay(alignment: .bottom) {
-                        if showToast, let toastMessage {
-                            ToastView(message: toastMessage)
-                                .padding(.bottom, 18)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        // Toast
+                        .overlay(alignment: .bottom) {
+                            if showToast, let toastMessage {
+                                ToastView(message: toastMessage)
+                                    .padding(.bottom, 18)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
                         }
                     }
                 }
@@ -515,33 +522,26 @@ struct HomeView: View {
     }
 
     // MARK: - キャラクターアニメ制御
-
-    /// ✅ Home表示中：ランダムタイミングで「まばたき」を繰り返す
     private func startCharacterIdleLoopIfNeeded() {
         guard idleLoopTask == nil else { return }
 
         idleLoopTask = Task {
-            // 画面が出た直後に即パチパチしないよう、少し待つ
             try? await Task.sleep(nanoseconds: 600_000_000)
 
             while !Task.isCancelled {
-                // Homeが見えていないなら待機
                 if !isHomeVisible {
                     try? await Task.sleep(nanoseconds: 300_000_000)
                     continue
                 }
 
-                // ジャンプ中はアイドルしない
                 if isCharacterActionRunning {
                     try? await Task.sleep(nanoseconds: 120_000_000)
                     continue
                 }
 
-                // ランダム待機（まばたき間隔）
                 let wait = Double.random(in: 2.2...6.0)
                 try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
 
-                // 途中で条件が変わったらスキップ
                 if Task.isCancelled { break }
                 if !isHomeVisible { continue }
                 if isCharacterActionRunning { continue }
@@ -557,38 +557,30 @@ struct HomeView: View {
     }
 
     private func triggerCharacterJump() {
-        // Home外/ジャンプ多重を防止
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
-
         Task { await playJump() }
     }
 
-    /// まばたき（purpor_idle_blink_0001 -> 0002 -> 0003 -> purpor）
     private func playBlink() async {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
 
         await MainActor.run { characterAssetName = "purpor_idle_blink_0001" }
         try? await Task.sleep(nanoseconds: 70_000_000)
-
-        // 途中でジャンプが入ったら中断
         if isCharacterActionRunning || !isHomeVisible { return }
 
         await MainActor.run { characterAssetName = "purpor_idle_blink_0002" }
         try? await Task.sleep(nanoseconds: 60_000_000)
-
         if isCharacterActionRunning || !isHomeVisible { return }
 
         await MainActor.run { characterAssetName = "purpor_idle_blink_0003" }
         try? await Task.sleep(nanoseconds: 70_000_000)
-
         if isCharacterActionRunning || !isHomeVisible { return }
 
         await MainActor.run { characterAssetName = "purpor" }
     }
 
-    /// ジャンプ（purpor_tap_0001 -> 0002(長め) -> 0003 -> purpor）
     private func playJump() async {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
@@ -599,7 +591,6 @@ struct HomeView: View {
         }
         try? await Task.sleep(nanoseconds: 80_000_000)
 
-        // ✅ ジャンプ中：少し長く表示
         await MainActor.run { characterAssetName = "purpor_tap_0002" }
         try? await Task.sleep(nanoseconds: 200_000_000)
 
@@ -613,9 +604,6 @@ struct HomeView: View {
     }
 
     // MARK: - Drag & Drop（ごはんをドロップして「あげる」）
-
-    /// ✅ キャラにドロップされた時の処理（成功したら true）
-    /// - 触覚フィードバックは入れない（要件）
     private func handleFoodDrop(foodId: String, state: AppState) -> Bool {
         guard let food = FoodCatalog.byId(foodId) else {
             toast("ご飯が見つかりません")
@@ -652,16 +640,11 @@ struct HomeView: View {
     }
 
     // MARK: - UI helpers
-
-    /// ✅ 進捗は「1周目=0..1、2周目以降=1..2..」の raw を返す（リング側で描き分ける）
     private func calcKcalProgressRaw(todayKcal: Int, goalKcal: Int) -> Double {
         guard goalKcal > 0 else { return 0 }
         return Double(todayKcal) / Double(goalKcal)
     }
 
-    /// ✅ Home復帰時など、表示walletが実walletとズレていたら調整
-    /// - 減少：カウントダウン演出（振動あり）
-    /// - 増加：基本は runSync の gain 演出でやる（ここでは即追従）
     private func reconcileWalletDisplayIfNeeded(state: AppState) async {
         guard isHomeVisible else { return }
         guard !isAnimatingGain else { return }
@@ -715,7 +698,6 @@ struct HomeView: View {
     }
 
     // MARK: - Friendship points
-
     private func addFriendshipWithAnimation(points: Int, state: AppState) {
         guard points > 0 else { return }
 
@@ -793,7 +775,6 @@ struct HomeView: View {
     }
 
     // MARK: - 今日の一枚
-
     private func loadTodayPhoto() {
         let key = AppState.makeDayKey(Date())
         do {
@@ -854,7 +835,6 @@ struct HomeView: View {
     }
 
     // MARK: - Toast
-
     private func toast(_ message: String) {
         toastMessage = message
         withAnimation(.easeInOut(duration: 0.2)) { showToast = true }
@@ -864,7 +844,6 @@ struct HomeView: View {
     }
 
     // MARK: - Care (Feed / Bath / Toilet)
-
     private func onTapFood(state: AppState) {
         Task { @MainActor in
             Haptics.rattle(duration: 0.12, style: .light)
@@ -940,7 +919,6 @@ struct HomeView: View {
     }
 
     // MARK: - AppState
-
     private func save() {
         do { try modelContext.save() } catch { }
     }
@@ -966,7 +944,6 @@ struct HomeView: View {
         let previousCachedSteps = state.cachedTodaySteps
         let previousCachedKcal = state.cachedTodayKcal
 
-        // ✅ 演出の開始点（UI表示の現在値）を確保
         let beforeDisplayedTodayKcal = displayedTodayKcal
         let beforeDisplayedWallet = displayedWalletKcal
 
@@ -990,18 +967,15 @@ struct HomeView: View {
         }
         save()
 
-        // ✅ pending → wallet へ反映（購入できるようにする）＋演出（リング＆通貨＆振動）
         await playGainAnimationIfNeeded(
             state: state,
             fromDisplayedTodayKcal: beforeDisplayedTodayKcal,
             fromDisplayedWallet: beforeDisplayedWallet
         )
 
-        // ✅ 念のため：演出が無いときも追従
         if !isAnimatingGain {
             displayedTodayKcal = todayKcal
 
-            // ✅ Home表示中のみ wallet 追従（ショップ滞在中に勝手に反映されないようにする）
             if isHomeVisible {
                 displayedWalletKcal = state.walletKcal
             }
