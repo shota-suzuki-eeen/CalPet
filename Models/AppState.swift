@@ -40,10 +40,17 @@ final class AppState {
     var friendshipPoint: Int
     var friendshipCardCount: Int
 
-    // ご飯フラグ（朝/昼/夜 各1回）
-    var fedMorning: Bool
-    var fedNoon: Bool
-    var fedNight: Bool
+    // MARK: - ✅ Satisfaction (Feed Spec: NEW)
+    // ✅ 満足度（0..3）
+    // - 3 が最大
+    // - 2時間で 1 減少（= 6h で 3 → 0）
+    // - 最大(3)のときはご飯をあげられない
+    // - 「満足度0の状態で3回あげられる」＝ 0→1→2→3
+    var satisfactionLevel: Int
+
+    // ✅ 満足度の“減少計算”の基準時刻
+    // - ここからの経過時間で減少を計算する
+    var satisfactionLastUpdatedAt: Date?
 
     // ✅ お風呂
     var bathLastAt: Date?           // 最後にお風呂した時刻
@@ -89,9 +96,9 @@ final class AppState {
         friendshipPoint: Int = 0,
         friendshipCardCount: Int = 0,
 
-        fedMorning: Bool = false,
-        fedNoon: Bool = false,
-        fedNight: Bool = false,
+        // ✅ 満足度（初期値は最大）
+        satisfactionLevel: Int = 3,
+        satisfactionLastUpdatedAt: Date? = nil,
 
         bathLastAt: Date? = nil,
         bathAdViewsToday: Int = 0,
@@ -130,9 +137,8 @@ final class AppState {
         self.friendshipPoint = friendshipPoint
         self.friendshipCardCount = friendshipCardCount
 
-        self.fedMorning = fedMorning
-        self.fedNoon = fedNoon
-        self.fedNight = fedNight
+        self.satisfactionLevel = satisfactionLevel
+        self.satisfactionLastUpdatedAt = satisfactionLastUpdatedAt
 
         self.bathLastAt = bathLastAt
         self.bathAdViewsToday = bathAdViewsToday
@@ -252,11 +258,6 @@ extension AppState {
         let todayKey = AppState.makeDayKey(now)
         guard lastDayKey != todayKey else { return }
 
-        // ✅ ご飯（朝/昼/夜 各1回） → 日跨ぎで全解除
-        fedMorning = false
-        fedNoon = false
-        fedNight = false
-
         // ✅ お風呂広告（最大2回/日） → 日跨ぎでリセット
         bathAdViewsToday = 0
 
@@ -362,68 +363,93 @@ extension AppState {
     }
 }
 
-// MARK: - Care (Feed / Bath / Toilet)
+// MARK: - ✅ Satisfaction (Feed / Decay: NEW)
 extension AppState {
-    // ===== Feed =====
+    // 2時間で1減少
+    private static let satisfactionDecayUnitSeconds: TimeInterval = 2 * 60 * 60
+    private static let satisfactionMax: Int = 3
 
-    enum FeedTimeSlot { case morning, noon, night }
-
-    /// 現在時刻から “ご飯可能時間帯” を判定
-    /// - morning: 6:00 - 10:00
-    /// - noon:    12:00 - 16:00
-    /// - night:   18:00 - 24:00（23:59まで）
-    func currentFeedTimeSlot(now: Date = Date(), calendar: Calendar = .current) -> FeedTimeSlot? {
-        let hour = calendar.component(.hour, from: now)
-        switch hour {
-        case 6...10:   return .morning   // ✅ 10時台を含める
-        case 12...16:  return .noon      // ✅ 16時台を含める
-        case 18...23:  return .night     // 18-23
-        default:       return nil
-        }
+    /// 満足度を 0...3 にクランプ
+    private func clampSatisfaction(_ v: Int) -> Int {
+        min(AppState.satisfactionMax, max(0, v))
     }
 
-    func feedCountToday() -> Int {
-        var c = 0
-        if fedMorning { c += 1 }
-        if fedNoon { c += 1 }
-        if fedNight { c += 1 }
-        return c
-    }
-
-    func didFeed(slot: FeedTimeSlot) -> Bool {
-        switch slot {
-        case .morning: return fedMorning
-        case .noon:    return fedNoon
-        case .night:   return fedNight
-        }
-    }
-
-    func setFed(slot: FeedTimeSlot, value: Bool = true) {
-        switch slot {
-        case .morning: fedMorning = value
-        case .noon:    fedNoon = value
-        case .night:   fedNight = value
-        }
-    }
-
-    func canFeedNow(now: Date = Date(), calendar: Calendar = .current) -> (can: Bool, slot: FeedTimeSlot?, reason: String?) {
+    /// ✅ 時間経過による満足度の減少を反映（線形・一定速度）
+    /// - 2時間ごとに 1 減少
+    /// - lastUpdatedAt を “減った分だけ” 進めて端数（余り時間）を保持する
+    @discardableResult
+    func refreshSatisfactionIfNeeded(now: Date = Date()) -> Int {
         ensureDailyResetIfNeeded(now: now)
 
-        guard let slot = currentFeedTimeSlot(now: now, calendar: calendar) else {
-            return (false, nil, "ご飯の提供時間外です")
+        // 初回は基準時刻を設定して終了（減少は次回以降）
+        guard let last = satisfactionLastUpdatedAt else {
+            satisfactionLastUpdatedAt = now
+            satisfactionLevel = clampSatisfaction(satisfactionLevel)
+            return satisfactionLevel
         }
 
-        if didFeed(slot: slot) {
-            return (false, slot, "この時間帯のご飯は既に完了しています")
+        let elapsed = now.timeIntervalSince(last)
+        if elapsed <= 0 {
+            satisfactionLevel = clampSatisfaction(satisfactionLevel)
+            return satisfactionLevel
         }
 
-        if feedCountToday() >= 3 {
-            return (false, slot, "本日のご飯は上限（3回）に達しています")
+        let steps = Int(floor(elapsed / AppState.satisfactionDecayUnitSeconds))
+        guard steps > 0 else {
+            satisfactionLevel = clampSatisfaction(satisfactionLevel)
+            return satisfactionLevel
         }
 
-        return (true, slot, nil)
+        // 減少
+        let before = satisfactionLevel
+        let after = clampSatisfaction(before - steps)
+        satisfactionLevel = after
+
+        // “減った分だけ” lastUpdatedAt を進める（余り時間を維持）
+        let advanced = TimeInterval(steps) * AppState.satisfactionDecayUnitSeconds
+        satisfactionLastUpdatedAt = last.addingTimeInterval(advanced)
+
+        return satisfactionLevel
     }
 
+    /// 現在の満足度（内部で減少反映してから返す）
+    func currentSatisfaction(now: Date = Date()) -> Int {
+        refreshSatisfactionIfNeeded(now: now)
+    }
+
+    /// ✅ ご飯をあげられるか（満足度が最大でない時だけOK）
+    func canFeedNow(now: Date = Date()) -> (can: Bool, reason: String?) {
+        refreshSatisfactionIfNeeded(now: now)
+
+        if satisfactionLevel >= AppState.satisfactionMax {
+            return (false, "満足度が最大のためご飯をあげられません")
+        }
+        return (true, nil)
+    }
+
+    /// ✅ ご飯を1回あげる（満足度 +1、最大3）
+    /// - HomeView側で、フード消費や演出の成功確定後に呼ぶ想定
+    @discardableResult
+    func feedOnce(now: Date = Date()) -> (didFeed: Bool, before: Int, after: Int, reason: String?) {
+        refreshSatisfactionIfNeeded(now: now)
+
+        let before = satisfactionLevel
+        guard before < AppState.satisfactionMax else {
+            return (false, before, before, "満足度が最大のためご飯をあげられません")
+        }
+
+        let after = clampSatisfaction(before + 1)
+        satisfactionLevel = after
+
+        // ✅ “あげた瞬間” を基準に減少開始（連打抑制ではなく、仕様通りの時間減衰の基準）
+        satisfactionLastUpdatedAt = now
+
+        return (true, before, after, nil)
+    }
+}
+
+// MARK: - Care (Bath / Toilet)
+extension AppState {
     // ===== Bath =====
 
     private static let bathCooldownSeconds: TimeInterval = 8 * 60 * 60

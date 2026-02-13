@@ -34,6 +34,9 @@ struct HomeView: View {
     // ✅ 所持通貨表示（演出でカウントアップ/ダウンさせる）
     @State private var displayedWalletKcal: Int = 0
 
+    // ✅ 満足度（表示用：0..3）
+    @State private var displayedSatisfaction: Int = 3
+
     // 目標入力（初回必須）
     @State private var showGoalSheet: Bool = false
 
@@ -92,19 +95,14 @@ struct HomeView: View {
     @State private var isCharacterActionRunning: Bool = false
 
     // ✅ 仕様追加：たまに2連続まばたき
-    private let doubleBlinkChance: Double = 0.18          // 18%くらいで2連続
-    private let doubleBlinkGapRange: ClosedRange<Double> = 0.18...0.45  // 2回目までの間隔（秒）
+    private let doubleBlinkChance: Double = 0.18
+    private let doubleBlinkGapRange: ClosedRange<Double> = 0.18...0.45
 
-    // MARK: - Layout（ここだけ触ればUI調整しやすい）
-    // ✅ ここを private -> fileprivate に変更（KcalRing から参照できるようにする）
+    // MARK: - Layout
     fileprivate enum Layout {
-        // ===== 全体 =====
-        static let bannerHeight: CGFloat = 76   // ✅ “バナーがあった時の高さ”をレイアウト保持に使う（表示はしない）
-
-        // ✅ 仕様：Home背景画像アセット名
+        static let bannerHeight: CGFloat = 76
         static let homeBackgroundAssetName: String = "Home_background"
 
-        // ===== 左上：メーター周り =====
         static let leftTopPaddingTop: CGFloat = 44
         static let leftTopPaddingLeading: CGFloat = 18
         static let meterStackSpacing: CGFloat = 18
@@ -117,89 +115,79 @@ struct HomeView: View {
         static let walletWidth: CGFloat = 125
         static let redMinWidth: CGFloat = 18
 
-        // ===== 右上：リング =====
+        // ✅ 満足度メーター（所持kcalの下）
+        static let satisfactionSpacingFromWallet: CGFloat = 8
+        static let satisfactionBarWidth: CGFloat = 125
+        static let satisfactionBarHeight: CGFloat = 10
+        static let satisfactionSegments: Int = 3
+        static let satisfactionSegmentGap: CGFloat = 4
+        static let satisfactionCornerRadius: CGFloat = 4
+
         static let kcalRingTop: CGFloat = 36
         static let kcalRingTrailing: CGFloat = 18
         static let kcalRingSizeOuter: CGFloat = 135
         static let kcalRingSizeInner: CGFloat = 115
 
-        // ===== 中央：キャラクター =====
         static let characterTopOffset: CGFloat = 45
         static let characterMaxWidth: CGFloat = 210
 
-        // ===== 右側：縦ボタン群 =====
         static let rightButtonsTopOffset: CGFloat = 210
         static let rightButtonsTrailing: CGFloat = 20
         static let rightButtonSize: CGFloat = 40
         static let rightButtonsSpacing: CGFloat = 18
 
-        // ===== 下部：横ボタン群 =====
         static let bottomButtonSize: CGFloat = 60
         static let bottomButtonsSpacing: CGFloat = 14
         static let bottomPadding: CGFloat = 80
         static let bottomHorizontalPadding: CGFloat = 14
 
-        // ===== ごはん棚 =====
         static let foodShelfHeight: CGFloat = 45
         static let foodShelfHorizontalPadding: CGFloat = 18
-        static let foodShelfBottomGapFromButtons: CGFloat = 120  // BottomButtons からの上方向オフセット
+        static let foodShelfBottomGapFromButtons: CGFloat = 120
         static let foodItemSize: CGFloat = 64
 
-        // ===== チケット演出 =====
         static let ticketMaxWidth: CGFloat = 220
         static let getMaxWidth: CGFloat = 240
         static let getTextMaxWidth: CGFloat = 200
 
-        // ✅ get_text：チケットの上部に、少し「右＆上」
         static let getTextOffsetX: CGFloat = 11
         static let getTextOffsetY: CGFloat = -160
 
-        // ✅ get 回転スピード（大きいほどゆっくり）
         static let getRotationDuration: Double = 2.2
 
-        // ✅ リング中央テキスト周り
         static let kcalCenterCurrentFont: CGFloat = 18
         static let kcalCenterGoalFont: CGFloat = 12
         static let kcalCenterDividerHeight: CGFloat = 1
-        static let kcalCenterDividerWidthRatio: CGFloat = 0.62   // innerSize * 0.62
+        static let kcalCenterDividerWidthRatio: CGFloat = 0.62
         static let kcalCenterSpacing: CGFloat = 4
     }
 
     var body: some View {
         NavigationStack {
             ZStack {
-                // ✅ 背景は「画面全体（セーフエリア含む）」に敷く
                 Image(Layout.homeBackgroundAssetName)
                     .resizable()
                     .scaledToFill()
-                    .ignoresSafeArea() // ← 上部の“空白”を確実に消す
+                    .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    // ✅ バナーは表示しないが「高さ分の空間」は保持して、既存UI位置を一切ずらさない
                     Color.clear
                         .frame(height: Layout.bannerHeight)
                         .frame(maxWidth: .infinity)
 
-                    // バナー下のステージ（ここから下は“バナーがあった時と同じ座標系”）
                     GeometryReader { geo in
                         let characterWidth = min(geo.size.width * 0.62, Layout.characterMaxWidth)
 
                         ZStack {
-                            // =========================
-                            // 1) キャラクター（中央）
-                            // =========================
+                            // 1) キャラクター
                             ZStack {
-                                // ✅ ドロップ判定 + タップ判定（ここがキャラの当たり判定）
                                 Rectangle()
-                                    .fill(Color.black.opacity(0.001)) // 0 だと不安定なことがある
+                                    .fill(Color.black.opacity(0.001))
                                     .frame(width: characterWidth, height: characterWidth * 1.15)
                                     .offset(y: Layout.characterTopOffset)
                                     .zIndex(50)
-                                    // ✅ タップ時：ジャンプ（アイドル停止）
                                     .highPriorityGesture(
-                                        TapGesture().onEnded {
-                                            triggerCharacterJump()
-                                        }
+                                        TapGesture().onEnded { triggerCharacterJump() }
                                     )
                                     .onDrop(
                                         of: [UTType.plainText.identifier, UTType.text.identifier],
@@ -207,7 +195,6 @@ struct HomeView: View {
                                     ) { providers in
                                         guard let provider = providers.first else { return false }
 
-                                        // 文字列として取り出す（FoodItemCell の draggable(food.id) を想定）
                                         provider.loadItem(
                                             forTypeIdentifier: UTType.plainText.identifier,
                                             options: nil
@@ -220,28 +207,22 @@ struct HomeView: View {
                                             }()
 
                                             guard let foodId = id else { return }
-
                                             DispatchQueue.main.async {
                                                 _ = handleFoodDrop(foodId: foodId, state: state)
                                             }
                                         }
-
-                                        // 受け入れは即 true（処理は非同期）
                                         return true
                                     }
 
-                                // ✅ 表示するキャラ画像を差し替え（アニメ用）
                                 Image(characterAssetName)
                                     .resizable()
                                     .scaledToFit()
                                     .frame(maxWidth: characterWidth)
                                     .offset(y: Layout.characterTopOffset)
-                                    .allowsHitTesting(false) // タッチ判定は上のRectが担当
+                                    .allowsHitTesting(false)
                             }
 
-                            // ==================================
-                            // 2) 左上：なかよし度 + 所持kcal
-                            // ==================================
+                            // 2) 左上：メーター
                             VStack(alignment: .leading, spacing: Layout.meterStackSpacing) {
                                 FriendshipMeter(
                                     value: displayedFriendship,
@@ -252,12 +233,23 @@ struct HomeView: View {
                                     redMinWidth: Layout.redMinWidth
                                 )
 
-                                WalletCapsule(
-                                    walletKcal: displayedWalletKcal, // ✅ 演出用表示値
-                                    barWidth: Layout.walletWidth,
-                                    height: Layout.capsuleHeight,
-                                    iconSize: Layout.iconCoinSize
-                                )
+                                VStack(alignment: .leading, spacing: Layout.satisfactionSpacingFromWallet) {
+                                    WalletCapsule(
+                                        walletKcal: displayedWalletKcal,
+                                        barWidth: Layout.walletWidth,
+                                        height: Layout.capsuleHeight,
+                                        iconSize: Layout.iconCoinSize
+                                    )
+
+                                    SatisfactionMeter(
+                                        level: displayedSatisfaction,
+                                        maxLevel: Layout.satisfactionSegments,
+                                        barWidth: Layout.satisfactionBarWidth,
+                                        height: Layout.satisfactionBarHeight,
+                                        gap: Layout.satisfactionSegmentGap,
+                                        cornerRadius: Layout.satisfactionCornerRadius
+                                    )
+                                }
 
                                 Spacer()
                             }
@@ -265,12 +257,10 @@ struct HomeView: View {
                             .padding(.leading, Layout.leftTopPaddingLeading)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-                            // =========================
-                            // 3) 右上：消費kcalリング
-                            // =========================
+                            // 3) 右上：リング
                             KcalRing(
-                                progress: displayedKcalProgress,     // ✅ 1.0超えを許可（2周目は緑）
-                                currentKcal: displayedTodayKcal,     // ✅ 演出で増える表示
+                                progress: displayedKcalProgress,
+                                currentKcal: displayedTodayKcal,
                                 goalKcal: state.dailyGoalKcal,
                                 outerSize: Layout.kcalRingSizeOuter,
                                 innerSize: Layout.kcalRingSizeInner
@@ -279,9 +269,7 @@ struct HomeView: View {
                             .padding(.trailing, Layout.kcalRingTrailing)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
 
-                            // =========================
-                            // 4) 右側：縦ボタン群
-                            // =========================
+                            // 4) 右側：縦ボタン
                             RightSideButtons(
                                 state: state,
                                 onCamera: { showPhotoPicker = true },
@@ -292,24 +280,19 @@ struct HomeView: View {
                             .padding(.trailing, Layout.rightButtonsTrailing)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
 
-                            // =========================
-                            // 4.5) ごはん棚（テロップ外タップで閉じる／棚上は閉じない）
-                            // =========================
+                            // 4.5) ごはん棚
                             if showFoodShelf {
                                 FoodShelfPanel(state: state)
                                     .padding(.horizontal, Layout.foodShelfHorizontalPadding)
                                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                                     .padding(.bottom, Layout.bottomPadding + Layout.foodShelfBottomGapFromButtons)
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                                    .onTapGesture { } // ✅ 棚の上タップは「背景タップ」に伝播させない
+                                    .onTapGesture { }
                             }
 
-                            // =========================
-                            // 5) 下部：横ボタン群（お世話ON表示対応）
-                            // =========================
+                            // 5) 下部：横ボタン群
                             TimelineView(.periodic(from: .now, by: 60)) { timeline in
                                 let now = timeline.date
-
                                 let canFood = state.canFeedNow(now: now).can
                                 let canBath = state.canBathNow(now: now).can
                                 let canWc = (state.toiletFlagAt != nil)
@@ -329,13 +312,18 @@ struct HomeView: View {
                                     spacing: Layout.bottomButtonsSpacing,
                                     horizontalPadding: Layout.bottomHorizontalPadding
                                 )
+                                // ✅ ここで “ViewBuilder内の代入” を避ける：更新は modifier でやる
+                                .onChange(of: timeline.date) { _, newDate in
+                                    displayedSatisfaction = state.currentSatisfaction(now: newDate)
+                                }
+                                .onAppear {
+                                    displayedSatisfaction = state.currentSatisfaction(now: now)
+                                }
                             }
                             .padding(.bottom, Layout.bottomPadding)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
 
-                            // =========================
-                            // 6) MAX到達：チケット演出（画面中央）
-                            // =========================
+                            // 6) チケット演出（省略なし）
                             if showTicketOverlay {
                                 ZStack {
                                     Color.black.opacity(0.001)
@@ -343,7 +331,6 @@ struct HomeView: View {
                                         .onTapGesture { dismissTicketOverlay() }
 
                                     ZStack {
-                                        // ✅ get → get_a に置換 + get_b を重ねて逆回転
                                         ZStack {
                                             Image("get_a")
                                                 .resizable()
@@ -381,8 +368,6 @@ struct HomeView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                        // ✅ ステージ背景タップで閉じる（全画面透明レイヤーは使わない＝D&Dを邪魔しない）
                         .contentShape(Rectangle())
                         .onTapGesture {
                             guard showFoodShelf else { return }
@@ -390,7 +375,6 @@ struct HomeView: View {
                                 showFoodShelf = false
                             }
                         }
-                        // Toast
                         .overlay(alignment: .bottom) {
                             if showToast, let toastMessage {
                                 ToastView(message: toastMessage)
@@ -420,13 +404,13 @@ struct HomeView: View {
                 didSetDailyGoalOnce = true
             }
 
-            // 起動直後はキャッシュをまず表示
             todaySteps = state.cachedTodaySteps
             todayKcal = state.cachedTodayKcal
 
-            // ✅ 初期表示（演出用表示値もここで合わせる）
             displayedTodayKcal = todayKcal
             displayedWalletKcal = state.walletKcal
+
+            displayedSatisfaction = state.currentSatisfaction(now: Date())
 
             displayedFriendship = Double(state.friendshipPoint)
             displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
@@ -447,13 +431,13 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             state.ensureInitialPetsIfNeeded()
 
-            // 復帰直後もまずはキャッシュで表示（0チラつき防止）
             todaySteps = state.cachedTodaySteps
             todayKcal = state.cachedTodayKcal
 
-            // ✅ リングはキャッシュに合わせて即座に整える（通貨は“戻ってきた時演出”のためここでは同期しない）
             displayedTodayKcal = todayKcal
             displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
+
+            displayedSatisfaction = state.currentSatisfaction(now: Date())
 
             handleDayRolloverIfNeeded(state: state)
 
@@ -462,7 +446,6 @@ struct HomeView: View {
                 maybeSpawnToiletFlag(state: state)
                 loadTodayPhoto()
 
-                // ✅ フォアグラ復帰時にHomeが見えているなら、必要に応じて差分演出で追従
                 if isHomeVisible {
                     await reconcileWalletDisplayIfNeeded(state: state)
                 }
@@ -488,29 +471,24 @@ struct HomeView: View {
         }
         .onAppear {
             isHomeVisible = true
-
-            // ✅ キャラのアイドルアニメ開始（Home表示中のみ）
             startCharacterIdleLoopIfNeeded()
 
-            // リングは即追従（演出は増加時のみ runSync 側）
             withAnimation(.easeOut(duration: 0.25)) {
                 displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
             }
 
-            // ✅ 通貨の減少（ショップ消費など）を検知してカウントダウン
+            displayedSatisfaction = state.currentSatisfaction(now: Date())
+
             Task { await reconcileWalletDisplayIfNeeded(state: state) }
         }
         .onDisappear {
             isHomeVisible = false
-            // 念のため、Home離脱時に振動停止
             Haptics.stopRattle()
 
-            // ✅ キャラアニメ停止
             stopCharacterIdleLoop()
             isCharacterActionRunning = false
             characterAssetName = "purpor"
         }
-        // ✅ wallet が裏で更新された場合も追従（ショップ購入など）
         .onChange(of: state.walletKcal) { _, _ in
             guard isHomeVisible else { return }
             Task { await reconcileWalletDisplayIfNeeded(state: state) }
@@ -525,7 +503,7 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - キャラクターアニメ制御
+    // MARK: - キャラクターアニメ制御（あなたのまま）
     private func startCharacterIdleLoopIfNeeded() {
         guard idleLoopTask == nil else { return }
 
@@ -550,14 +528,11 @@ struct HomeView: View {
                 if !isHomeVisible { continue }
                 if isCharacterActionRunning { continue }
 
-                // ✅ 仕様：基本は従来通り「1回まばたき」
-                // ✅ 追加：たまに「2連続まばたき」
                 let doDouble = Double.random(in: 0...1) < doubleBlinkChance
 
                 await playBlink()
 
                 if doDouble {
-                    // 2回目まで少し間を空ける（不自然に連射しない）
                     let gap = Double.random(in: doubleBlinkGapRange)
                     try? await Task.sleep(nanoseconds: UInt64(gap * 1_000_000_000))
 
@@ -623,15 +598,16 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Drag & Drop（ごはんをドロップして「あげる」）
+    // MARK: - Drag & Drop（ごはん）
     private func handleFoodDrop(foodId: String, state: AppState) -> Bool {
         guard let food = FoodCatalog.byId(foodId) else {
             toast("ご飯が見つかりません")
             return false
         }
 
+        // ✅ 満足度MAXなら不可
         let check = state.canFeedNow(now: Date())
-        guard check.can, let slot = check.slot else {
+        guard check.can else {
             toast(check.reason ?? "今はご飯できません")
             return false
         }
@@ -647,8 +623,15 @@ struct HomeView: View {
             return false
         }
 
-        state.setFed(slot: slot, value: true)
+        let fed = state.feedOnce(now: Date())
+        guard fed.didFeed else {
+            toast(fed.reason ?? "今はご飯できません")
+            return false
+        }
+
         save()
+
+        displayedSatisfaction = fed.after
 
         addFriendshipWithAnimation(points: 10, state: state)
         toast("\(food.name)をあげた！ +10")
@@ -717,7 +700,7 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Friendship points
+    // MARK: - Friendship points（あなたのまま）
     private func addFriendshipWithAnimation(points: Int, state: AppState) {
         guard points > 0 else { return }
 
@@ -794,7 +777,7 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - 今日の一枚
+    // MARK: - 今日の一枚（あなたのまま）
     private func loadTodayPhoto() {
         let key = AppState.makeDayKey(Date())
         do {
@@ -1148,6 +1131,37 @@ private struct WalletCapsule: View {
     }
 }
 
+// ✅ 満足度メーター（3区切り）
+private struct SatisfactionMeter: View {
+    let level: Int
+    let maxLevel: Int
+    let barWidth: CGFloat
+    let height: CGFloat
+    let gap: CGFloat
+    let cornerRadius: CGFloat
+
+    private var clamped: Int { min(max(0, level), maxLevel) }
+
+    var body: some View {
+        let segments = max(1, maxLevel)
+        let totalGap = gap * CGFloat(max(0, segments - 1))
+        let segWidth = (barWidth - totalGap) / CGFloat(segments)
+
+        HStack(spacing: gap) {
+            ForEach(0..<segments, id: \.self) { idx in
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(idx < clamped ? Color.white.opacity(0.95) : Color.black.opacity(0.55))
+                    .frame(width: segWidth, height: height)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius)
+                            .stroke(Color.black.opacity(0.35), lineWidth: 1)
+                    )
+            }
+        }
+        .frame(width: barWidth, height: height, alignment: .leading)
+    }
+}
+
 private struct KcalRing: View {
     let progress: Double
     let currentKcal: Int
@@ -1396,8 +1410,6 @@ private struct GoalSettingSheet: View {
     }
 }
 
-// MARK: - ごはん棚（仕様変更版）
-
 private struct FoodShelfPanel: View {
     let state: AppState
 
@@ -1407,7 +1419,6 @@ private struct FoodShelfPanel: View {
 
     var body: some View {
         ZStack {
-            // ✅ 土台：gohan_telop（枠線なし）
             Image("gohan_telop")
                 .resizable()
                 .scaledToFill()
@@ -1455,7 +1466,6 @@ private struct FoodItemCell: View {
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(Color.black.opacity(0.45), lineWidth: 2)
                 )
-                // ✅ これを掴んでキャラにドロップする（プレビュー付き）
                 .draggable(food.id) {
                     Image(food.assetName)
                         .resizable()
