@@ -290,10 +290,13 @@ struct HomeView: View {
                             }
 
                             // 5) 下部：横ボタン群
-                            TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                            // ✅ TimelineView の Content 推論を安定させるため by は Double に寄せる
+                            TimelineView(.periodic(from: Date(), by: 60.0)) { timeline in
                                 let now = timeline.date
-                                let canFood = state.canFeedNow(now: now).can
-                                let canBath = state.canBathNow(now: now).can
+
+                                // ✅ 表示用Stateから判定（body評価中に AppState を書き換える呼び出しはしない）
+                                let canFood = (displayedSatisfaction < Layout.satisfactionSegments)
+                                let canBath = isBathAvailablePure(now: now)
                                 let canWc = (state.toiletFlagAt != nil)
                                 let canSleep = true
 
@@ -311,12 +314,19 @@ struct HomeView: View {
                                     spacing: Layout.bottomButtonsSpacing,
                                     horizontalPadding: Layout.bottomHorizontalPadding
                                 )
-                                // ✅ ここで “ViewBuilder内の代入” を避ける：更新は modifier でやる
                                 .onChange(of: timeline.date) { _, newDate in
+                                    // ✅ “refreshSatisfactionIfNeeded” に依存しない（AppState差分で壊れないように）
                                     displayedSatisfaction = state.currentSatisfaction(now: newDate)
+
+                                    // 日跨ぎリセットはイベント側で
+                                    state.ensureDailyResetIfNeeded(now: newDate)
+                                    save()
                                 }
                                 .onAppear {
                                     displayedSatisfaction = state.currentSatisfaction(now: now)
+
+                                    state.ensureDailyResetIfNeeded(now: now)
+                                    save()
                                 }
                             }
                             .padding(.bottom, Layout.bottomPadding)
@@ -368,12 +378,14 @@ struct HomeView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard showFoodShelf else { return }
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                showFoodShelf = false
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                guard showFoodShelf else { return }
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    showFoodShelf = false
+                                }
                             }
-                        }
+                        )
                         .overlay(alignment: .bottom) {
                             if showToast, let toastMessage {
                                 ToastView(message: toastMessage)
@@ -412,6 +424,7 @@ struct HomeView: View {
             displayedTodayKcal = todayKcal
             displayedWalletKcal = state.walletKcal
 
+            // ✅ ここも refreshSatisfactionIfNeeded 依存を外す
             displayedSatisfaction = state.currentSatisfaction(now: Date())
 
             displayedFriendship = Double(state.friendshipPoint)
@@ -503,6 +516,14 @@ struct HomeView: View {
                 displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
             }
         }
+    }
+
+    // MARK: - ✅ Bath availability（純参照：body内で安全に使える）
+    private func isBathAvailablePure(now: Date) -> Bool {
+        // ensureDailyResetIfNeeded は呼ばない（= 書き換えない）
+        guard let last = state.bathLastAt else { return true }
+        let elapsed = now.timeIntervalSince(last)
+        return elapsed >= (8 * 60 * 60)
     }
 
     // MARK: - キャラクターアニメ制御（あなたのまま）
@@ -854,6 +875,10 @@ struct HomeView: View {
 
     private func onTapBath(state: AppState) {
         let now = Date()
+
+        // ✅ アクション前に日跨ぎ処理だけはここで確実に行う（イベント側なのでOK）
+        state.ensureDailyResetIfNeeded(now: now)
+
         let bath = state.canBathNow(now: now)
 
         if bath.can {

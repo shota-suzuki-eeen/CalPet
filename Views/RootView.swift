@@ -14,7 +14,7 @@ struct RootView: View {
     @Query private var appStates: [AppState]
     @StateObject private var hk = HealthKitManager()
 
-    // ✅ 起動時処理が多重実行されないようにする
+    // ✅ 起動時処理が多重実行されないようにする（VM側でガード）
     @StateObject private var viewModel = RootViewModel()
 
     // ✅ BGM（App側でenvironmentObject注入している前提）
@@ -44,6 +44,7 @@ struct RootView: View {
                 }
             }
         }
+        // ✅ boot処理（VM側で「多重実行しない」ガードを持つ想定）
         .task {
             await viewModel.bootIfNeeded(
                 appStates: appStates,
@@ -57,18 +58,19 @@ struct RootView: View {
             case .active:
                 // ✅ 復帰時に再生が止まっていたら再開
                 bgmManager.startIfNeeded()
+
             case .background:
                 // ✅ 常時再生したい場合でも、ここで止めない（仕様：無限ループ再生）
-                // bgmManager.stop() などは実装しても、現仕様では呼ばない
                 break
+
             case .inactive:
                 break
+
             @unknown default:
                 break
             }
         }
     }
-
 }
 
 // MARK: - Shared views

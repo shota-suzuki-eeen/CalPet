@@ -252,8 +252,9 @@ extension AppState {
 
 // MARK: - Day Reset (Care Spec)
 extension AppState {
-    /// 日跨ぎリセット（お世話系の “今日” 依存状態を正しくクリアする）
-    /// - Note: HomeViewの onAppear やアクション実行前に呼ぶ想定
+    /// ✅ 日跨ぎリセット（お世話系の “今日” 依存状態を正しくクリアする）
+    /// - Note: これは「明示的に」呼ぶ（例：HomeViewの onAppear / フォア復帰 / アクション実行前）
+    /// - ⚠️ 重要：UIの描画中に頻繁に呼ばれる “判定関数” の中では呼ばない（フリーズの温床になる）
     func ensureDailyResetIfNeeded(now: Date = Date()) {
         let todayKey = AppState.makeDayKey(now)
         guard lastDayKey != todayKey else { return }
@@ -265,6 +266,12 @@ extension AppState {
         toiletFlagAt = nil
         // ✅ 最終発生時刻もクリア（翌日に最低1h制限を持ち越す必要はない）
         toiletLastRaisedAt = nil
+
+        // ✅ 満足度：日跨ぎで基準時刻を揃える（減衰計算の不整合を防ぐ）
+        // - 値そのものは維持（ゲーム仕様次第でここを 3 に戻す等も可能）
+        if satisfactionLastUpdatedAt == nil {
+            satisfactionLastUpdatedAt = now
+        }
 
         // 既存の lastDayKey 更新
         lastDayKey = todayKey
@@ -286,6 +293,7 @@ extension AppState {
         fetchedKcal: Int,
         todayKey: String
     ) -> CacheUpdateResult {
+        // ここは “todayKey” を外から渡しているので副作用は最小限に保つ
         if lastDayKey != todayKey {
             cachedTodaySteps = 0
             cachedTodayKcal = 0
@@ -364,6 +372,7 @@ extension AppState {
 }
 
 // MARK: - ✅ Satisfaction (Feed / Decay: NEW)
+// ⚠️ 重要：UI描画中に頻繁に呼ばれる関数は “副作用なし” にする（ここがフリーズ対策の肝）
 extension AppState {
     // 2時間で1減少
     private static let satisfactionDecayUnitSeconds: TimeInterval = 2 * 60 * 60
@@ -374,64 +383,78 @@ extension AppState {
         min(AppState.satisfactionMax, max(0, v))
     }
 
-    /// ✅ 時間経過による満足度の減少を反映（線形・一定速度）
-    /// - 2時間ごとに 1 減少
-    /// - lastUpdatedAt を “減った分だけ” 進めて端数（余り時間）を保持する
-    @discardableResult
-    func refreshSatisfactionIfNeeded(now: Date = Date()) -> Int {
-        ensureDailyResetIfNeeded(now: now)
+    /// ✅（副作用なし）現在時刻における “表示上の満足度” を計算して返す
+    /// - satisfactionLevel / satisfactionLastUpdatedAt を「書き換えない」
+    private func computedSatisfaction(now: Date = Date()) -> (level: Int, effectiveLastUpdatedAt: Date?) {
+        let current = clampSatisfaction(satisfactionLevel)
 
-        // 初回は基準時刻を設定して終了（減少は次回以降）
         guard let last = satisfactionLastUpdatedAt else {
-            satisfactionLastUpdatedAt = now
-            satisfactionLevel = clampSatisfaction(satisfactionLevel)
-            return satisfactionLevel
+            // 基準がない場合は「現状値のまま」表示（初回設定は別のタイミングで行う）
+            return (current, nil)
         }
 
         let elapsed = now.timeIntervalSince(last)
         if elapsed <= 0 {
-            satisfactionLevel = clampSatisfaction(satisfactionLevel)
-            return satisfactionLevel
+            return (current, last)
         }
 
         let steps = Int(floor(elapsed / AppState.satisfactionDecayUnitSeconds))
-        guard steps > 0 else {
-            satisfactionLevel = clampSatisfaction(satisfactionLevel)
-            return satisfactionLevel
+        if steps <= 0 {
+            return (current, last)
         }
 
-        // 減少
-        let before = satisfactionLevel
-        let after = clampSatisfaction(before - steps)
-        satisfactionLevel = after
+        let after = clampSatisfaction(current - steps)
 
-        // “減った分だけ” lastUpdatedAt を進める（余り時間を維持）
+        // “減った分だけ”進んだ基準時刻（ただし保存はしない）
         let advanced = TimeInterval(steps) * AppState.satisfactionDecayUnitSeconds
-        satisfactionLastUpdatedAt = last.addingTimeInterval(advanced)
+        let effLast = last.addingTimeInterval(advanced)
 
-        return satisfactionLevel
+        return (after, effLast)
     }
 
-    /// 現在の満足度（内部で減少反映してから返す）
+    /// ✅（副作用なし）UI表示用：現在の満足度
     func currentSatisfaction(now: Date = Date()) -> Int {
-        refreshSatisfactionIfNeeded(now: now)
+        computedSatisfaction(now: now).level
     }
 
-    /// ✅ ご飯をあげられるか（満足度が最大でない時だけOK）
+    /// ✅（副作用なし）ご飯をあげられるか（満足度が最大でない時だけOK）
     func canFeedNow(now: Date = Date()) -> (can: Bool, reason: String?) {
-        refreshSatisfactionIfNeeded(now: now)
-
-        if satisfactionLevel >= AppState.satisfactionMax {
+        let level = computedSatisfaction(now: now).level
+        if level >= AppState.satisfactionMax {
             return (false, "満足度が最大のためご飯をあげられません")
         }
         return (true, nil)
     }
 
+    /// ✅（副作用あり：アクション用）時間経過の減少を “保存” する
+    /// - これは HomeView のボタン処理（ご飯をあげる等）の直前に呼ばれる想定
+    @discardableResult
+    func applySatisfactionDecayIfNeeded(now: Date = Date()) -> Int {
+        // アクション実行前にだけ daily reset を許可（描画中ループの原因にしない）
+        ensureDailyResetIfNeeded(now: now)
+
+        // 初回は基準時刻を設定して終了（減少は次回以降）
+        guard satisfactionLastUpdatedAt != nil else {
+            satisfactionLastUpdatedAt = now
+            satisfactionLevel = clampSatisfaction(satisfactionLevel)
+            return satisfactionLevel
+        }
+
+        let computed = computedSatisfaction(now: now)
+        // 計算結果を保存
+        satisfactionLevel = clampSatisfaction(computed.level)
+        if let eff = computed.effectiveLastUpdatedAt {
+            satisfactionLastUpdatedAt = eff
+        }
+        return satisfactionLevel
+    }
+
     /// ✅ ご飯を1回あげる（満足度 +1、最大3）
-    /// - HomeView側で、フード消費や演出の成功確定後に呼ぶ想定
+    /// - ここは “アクション” なので副作用ありでOK
     @discardableResult
     func feedOnce(now: Date = Date()) -> (didFeed: Bool, before: Int, after: Int, reason: String?) {
-        refreshSatisfactionIfNeeded(now: now)
+        // アクション前に減衰を確定
+        _ = applySatisfactionDecayIfNeeded(now: now)
 
         let before = satisfactionLevel
         guard before < AppState.satisfactionMax else {
@@ -441,7 +464,7 @@ extension AppState {
         let after = clampSatisfaction(before + 1)
         satisfactionLevel = after
 
-        // ✅ “あげた瞬間” を基準に減少開始（連打抑制ではなく、仕様通りの時間減衰の基準）
+        // ✅ “あげた瞬間” を基準に減少開始
         satisfactionLastUpdatedAt = now
 
         return (true, before, after, nil)
@@ -449,6 +472,7 @@ extension AppState {
 }
 
 // MARK: - Care (Bath / Toilet)
+// ⚠️ 判定系（can〜）は副作用なし、実行系（mark/apply/raise/resolve）は副作用ありOK
 extension AppState {
     // ===== Bath =====
 
@@ -456,9 +480,8 @@ extension AppState {
     private static let bathAdReduceSecondsPerWatch: TimeInterval = 4 * 60 * 60
     private static let bathAdLimitPerDay: Int = 2
 
+    /// ✅（副作用なし）お風呂できるか
     func canBathNow(now: Date = Date()) -> (can: Bool, remainingSeconds: TimeInterval) {
-        ensureDailyResetIfNeeded(now: now)
-
         guard let last = bathLastAt else { return (true, 0) }
 
         let elapsed = now.timeIntervalSince(last)
@@ -467,9 +490,8 @@ extension AppState {
         return (false, remaining)
     }
 
+    /// ✅（副作用なし）広告短縮できるか
     func canUseBathAd(now: Date = Date()) -> (can: Bool, reason: String?) {
-        ensureDailyResetIfNeeded(now: now)
-
         if bathAdViewsToday >= AppState.bathAdLimitPerDay {
             return (false, "本日の広告短縮は上限（2回）に達しています")
         }
@@ -480,6 +502,7 @@ extension AppState {
         return (true, nil)
     }
 
+    /// ✅（副作用あり：アクション）広告短縮を適用
     func applyBathAdReduction(now: Date = Date()) {
         ensureDailyResetIfNeeded(now: now)
 
@@ -490,6 +513,7 @@ extension AppState {
         bathLastAt = last.addingTimeInterval(-AppState.bathAdReduceSecondsPerWatch)
     }
 
+    /// ✅（副作用あり：アクション）お風呂実行
     func markBathDone(now: Date = Date()) {
         ensureDailyResetIfNeeded(now: now)
         bathLastAt = now
@@ -500,12 +524,8 @@ extension AppState {
     private static let toiletBonusWindowSeconds: TimeInterval = 60 * 60 // 1時間
     private static let toiletMinIntervalSeconds: TimeInterval = 60 * 60 // 最低1時間間隔
 
-    /// トイレフラグを立てられるか
-    /// - フラグが立っている間は次のフラグは立たない
-    /// - 最低でも1時間は間隔（= 前回フラグ発生から1h未満はNG）
+    /// ✅（副作用なし）トイレフラグを立てられるか
     func canRaiseToiletFlag(now: Date = Date()) -> Bool {
-        ensureDailyResetIfNeeded(now: now)
-
         if toiletFlagAt != nil { return false }
 
         if let last = toiletLastRaisedAt {
@@ -517,7 +537,7 @@ extension AppState {
         return true
     }
 
-    /// トイレフラグを立てる（ランダムタイミングで呼ぶ想定）
+    /// ✅（副作用あり：アクション）トイレフラグを立てる
     @discardableResult
     func raiseToiletFlag(now: Date = Date()) -> Bool {
         ensureDailyResetIfNeeded(now: now)
@@ -529,8 +549,7 @@ extension AppState {
         return true
     }
 
-    /// トイレ対応（フラグが立っている時のみ）
-    /// - Returns: 1時間以内だったか（= 2倍の扱い）
+    /// ✅（副作用あり：アクション）トイレ対応
     func resolveToilet(now: Date = Date()) -> (didResolve: Bool, isWithin1h: Bool) {
         ensureDailyResetIfNeeded(now: now)
 
