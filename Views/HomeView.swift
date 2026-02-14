@@ -800,7 +800,7 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - 今日の一枚（あなたのまま）
+    // MARK: - 今日の一枚
     private func loadTodayPhoto() {
         let key = AppState.makeDayKey(Date())
         do {
@@ -820,6 +820,7 @@ struct HomeView: View {
         }
     }
 
+    /// ✅ ここだけは「SwiftData保存失敗」を握りつぶさず検知する
     private func saveTodayPhoto(_ uiImage: UIImage) {
         do {
             let key = AppState.makeDayKey(Date())
@@ -843,13 +844,16 @@ struct HomeView: View {
                 todayPhotoEntry = created
             }
 
-            save()
+            // ✅ ここが重要：握りつぶさず “確実に保存”
+            try modelContext.save()
+
             todayPhotoImage = uiImage
             toast("今日の一枚を保存しました")
             Task { @MainActor in
                 Haptics.rattle(duration: 0.18, style: .light)
             }
         } catch {
+            print("❌ saveTodayPhoto failed:", error)
             toast("保存に失敗しました")
         }
     }
@@ -944,7 +948,11 @@ struct HomeView: View {
 
     // MARK: - AppState
     private func save() {
-        do { try modelContext.save() } catch { }
+        do {
+            try modelContext.save()
+        } catch {
+            print("❌ modelContext.save() failed:", error)
+        }
     }
 
     private func handleDayRolloverIfNeeded(state: AppState) {

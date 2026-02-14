@@ -6,8 +6,7 @@ import RealityKit
 
 struct CameraCaptureView: View {
 
-    // ✅ 背景スナップショット関数
-    // completion に UIImage? を返すだけの “撮影関数”
+    // ✅ completion に UIImage? を返すだけの “撮影関数”
     typealias Snapshotter = (@escaping (UIImage?) -> Void) -> Void
 
     enum Mode: String, Identifiable {
@@ -44,55 +43,59 @@ struct CameraCaptureView: View {
 
     var body: some View {
         GeometryReader { geo in
+            let characterW = min(geo.size.width * 0.45, 220)
+
             ZStack {
+                // ✅ 背景（AR/カメラ）
                 captureSurface
                     .ignoresSafeArea()
+                    .background(Color.black)
 
+            }
+            // ✅ UIは overlay で上に固定（重なり順を確実に）
+            .overlay(alignment: .center) {
                 // キャラ（プレビュー用）
                 Image("purpor")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: min(geo.size.width * 0.45, 220))
+                    .frame(width: characterW)
                     .scaleEffect(characterScale)
                     .offset(characterOffset)
                     .gesture(characterGesture)
-
-                VStack {
-                    HStack {
-                        Button("閉じる") { onCancel() }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(.black.opacity(0.5), in: Capsule())
-
-                        Spacer()
-
-                        Picker("撮影", selection: $mode) {
-                            ForEach([Mode.ar, .plain]) { m in
-                                Text(m.title).tag(m)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 170)
-                    }
-                    .foregroundStyle(.white)
-                    .padding()
+            }
+            .overlay(alignment: .top) {
+                HStack {
+                    Button("閉じる") { onCancel() }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.5), in: Capsule())
 
                     Spacer()
 
-                    Button {
-                        captureSnapshot(viewSize: geo.size)
-                    } label: {
-                        ZStack {
-                            Circle().fill(Color.white.opacity(0.28)).frame(width: 78, height: 78)
-                            Circle().fill(Color.white).frame(width: 62, height: 62)
+                    Picker("撮影", selection: $mode) {
+                        ForEach([Mode.ar, .plain]) { m in
+                            Text(m.title).tag(m)
                         }
                     }
-                    .disabled(isCapturing)
-                    .opacity(isCapturing ? 0.6 : 1.0)
-                    .padding(.bottom, 40)
+                    .pickerStyle(.segmented)
+                    .frame(width: 170)
                 }
+                .foregroundStyle(.white)
+                .padding()
             }
-            .background(.black)
+            .overlay(alignment: .bottom) {
+                Button {
+                    captureSnapshot(viewSize: geo.size)
+                } label: {
+                    ZStack {
+                        Circle().fill(Color.white.opacity(0.28)).frame(width: 78, height: 78)
+                        Circle().fill(Color.white).frame(width: 62, height: 62)
+                    }
+                }
+                .disabled(isCapturing || takeBackgroundSnapshot == nil)
+                .opacity((isCapturing || takeBackgroundSnapshot == nil) ? 0.6 : 1.0)
+                .padding(.bottom, 40)
+            }
         }
         .onChange(of: mode) { _, _ in
             // ✅ モード切替時に古い snapshotter を使わないようクリア
@@ -106,12 +109,17 @@ struct CameraCaptureView: View {
     private var captureSurface: some View {
         if mode == .ar {
             ARCameraBackgroundView { snapshotter in
-                // ✅ snapshotter を保持（= escaping）するので、Representable 側で @escaping を付ける必要がある
-                takeBackgroundSnapshot = snapshotter
+                // ✅ makeUIView中のState更新を避ける
+                DispatchQueue.main.async {
+                    self.takeBackgroundSnapshot = snapshotter
+                }
             }
         } else {
             CameraPreviewView { snapshotter in
-                takeBackgroundSnapshot = snapshotter
+                // ✅ makeUIView中のState更新を避ける
+                DispatchQueue.main.async {
+                    self.takeBackgroundSnapshot = snapshotter
+                }
             }
         }
     }
@@ -220,10 +228,17 @@ private struct CameraPreviewView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PreviewUIView {
         let view = PreviewUIView()
+
+        // ✅ UIKit側でもタッチを完全遮断（ここが重要）
+        view.isUserInteractionEnabled = false
+
         view.startRunning()
 
-        onSnapshotReady { completion in
-            view.capturePhoto(completion: completion)
+        // ✅ makeUIView中の即時コールを避ける（State更新の警告回避）
+        DispatchQueue.main.async {
+            onSnapshotReady { completion in
+                view.capturePhoto(completion: completion)
+            }
         }
 
         return view
@@ -335,6 +350,9 @@ private struct ARCameraBackgroundView: UIViewRepresentable {
     func makeUIView(context: Context) -> ARView {
         let view = ARView(frame: .zero)
 
+        // ✅ UIKit側でもタッチを完全遮断（ここが重要）
+        view.isUserInteractionEnabled = false
+
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
 
@@ -342,9 +360,12 @@ private struct ARCameraBackgroundView: UIViewRepresentable {
         view.session.run(config)
         view.renderOptions.insert(.disableMotionBlur)
 
-        onSnapshotReady { completion in
-            view.snapshot(saveToHDR: false) { img in
-                completion(img)
+        // ✅ makeUIView中の即時コールを避ける（State更新の警告回避）
+        DispatchQueue.main.async {
+            onSnapshotReady { completion in
+                view.snapshot(saveToHDR: false) { img in
+                    completion(img)
+                }
             }
         }
 
