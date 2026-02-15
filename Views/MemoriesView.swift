@@ -4,18 +4,17 @@ import UIKit
 
 struct MemoriesView: View {
     enum DisplayMode: String, CaseIterable, Identifiable {
-        case week = "週"
-        case month = "月"
-        case year = "年"
+        case day = "day"
+        case week = "week"
+        case month = "month"
 
         var id: String { rawValue }
 
-        /// できるだけ大きめ（要望）にしつつ、年表示は詰める
         var cellHeight: CGFloat {
             switch self {
             case .week: return 160
             case .month: return 104
-            case .year: return 48
+            case .day: return 0
             }
         }
 
@@ -23,7 +22,7 @@ struct MemoriesView: View {
             switch self {
             case .week: return 8
             case .month: return 8
-            case .year: return 4
+            case .day: return 0
             }
         }
 
@@ -31,7 +30,7 @@ struct MemoriesView: View {
             switch self {
             case .week: return 12
             case .month: return 12
-            case .year: return 8
+            case .day: return 0
             }
         }
     }
@@ -39,13 +38,21 @@ struct MemoriesView: View {
     @Query(sort: \TodayPhotoEntry.date, order: .reverse) private var entries: [TodayPhotoEntry]
     @StateObject private var viewModel = MemoriesViewModel()
 
-    @State private var mode: DisplayMode = .month
+    // ✅ day を一番左＆デフォルト
+    @State private var mode: DisplayMode = .day
     @State private var focusDate: Date = Date()
+
+    // ✅ シート（同日写真ビュー）
+    @State private var sheetItem: DayPhotosSheetItem?
+
+    // トースト
+    @State private var toastMessage: String?
+    @State private var showToast: Bool = false
 
     private let cal = Calendar.current
 
     var body: some View {
-        let entryMap = makeEntryMap(entries)
+        let entryMap = makeEntryMapLatestPerDay(entries)
         let columns = Array(repeating: GridItem(.flexible(), spacing: mode.gridSpacing), count: 7)
 
         ZStack {
@@ -53,35 +60,64 @@ struct MemoriesView: View {
 
             VStack(spacing: 12) {
                 modeHeader
-                weekdayHeader
+
+                if mode != .day {
+                    weekdayHeader
+                }
 
                 if entries.isEmpty {
                     emptyView
                 } else {
                     ScrollView {
                         switch mode {
+                        case .day:
+                            dayList(entries: entries)
+
                         case .week:
                             weekGrid(entryMap: entryMap, columns: columns)
+
                         case .month:
                             monthGrid(entryMap: entryMap, columns: columns)
-                        case .year:
-                            yearGrid(entryMap: entryMap)
                         }
                     }
                 }
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
+
+            if showToast, let toastMessage {
+                VStack {
+                    Spacer()
+                    Text(toastMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.thinMaterial)
+                        .clipShape(Capsule())
+                        .shadow(radius: 8)
+                        .padding(.bottom, 18)
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .navigationTitle("思い出")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $viewModel.selectedEntry) { e in
-            MemoryDetail(entry: e, image: viewModel.selectedImage, titleText: viewModel.labelText(for: e.date))
+
+        // ✅ DayPhotosView は “別ファイル” のものを開く（重複定義しない）
+        .sheet(item: $sheetItem) { item in
+            DayPhotosView(
+                dayKey: item.dayKey,
+                initialFileName: item.initialFileName,
+                titleText: item.titleText,
+                viewModel: viewModel,
+                onToast: toast
+            )
         }
+
         .onChange(of: mode) { _, newMode in
-            // 年表示はセル数が多くなるので、切替時に軽くしておく（必要なら削ってOK）
-            if newMode == .year {
-                viewModel.clearInMemoryCache(keepSelected: true)
+            if newMode == .day {
+                viewModel.clearInMemoryCache(keepSelectedDay: true)
             }
         }
     }
@@ -164,53 +200,37 @@ struct MemoriesView: View {
         .padding(.top, 4)
     }
 
-    private func yearGrid(entryMap: [String: TodayPhotoEntry]) -> some View {
-        let year = cal.component(.year, from: focusDate)
-        let months: [Date] = (1...12).compactMap { month in
-            var comps = DateComponents()
-            comps.year = year
-            comps.month = month
-            comps.day = 1
-            return cal.date(from: comps)
-        }
-
-        let yearColumns = Array(repeating: GridItem(.flexible(), spacing: DisplayMode.year.gridSpacing), count: 7)
-
-        return VStack(spacing: 12) {
-            ForEach(months, id: \.self) { monthDate in
-                let slots = monthSlots(for: monthDate)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(monthTitle(for: monthDate))
-                        .font(.subheadline)
-                        .bold()
-
-                    LazyVGrid(columns: yearColumns, spacing: DisplayMode.year.gridSpacing) {
-                        ForEach(0..<slots.count, id: \.self) { idx in
-                            if let day = slots[idx] {
-                                yearDayCell(for: day, entryMap: entryMap)
-                            } else {
-                                RoundedRectangle(cornerRadius: DisplayMode.year.cellCornerRadius)
-                                    .fill(Color.white.opacity(0.16))
-                                    .frame(height: DisplayMode.year.cellHeight)
-                            }
+    // ✅ day：縦に写真が並ぶ（撮影時間の降順）
+    private func dayList(entries: [TodayPhotoEntry]) -> some View {
+        LazyVStack(spacing: 10) {
+            ForEach(entries) { e in
+                DayRow(entry: e, thumb: viewModel.image(forFileName: e.fileName))
+                    .onTapGesture {
+                        // ✅ ここが要望：タップした写真の位置から開く
+                        sheetItem = DayPhotosSheetItem(
+                            dayKey: e.dayKey,
+                            initialFileName: e.fileName,
+                            titleText: dayTitleText(e.dayKey)
+                        )
+                    }
+                    .onAppear {
+                        if viewModel.image(forFileName: e.fileName) == nil {
+                            viewModel.loadImageIfNeeded(fileName: e.fileName)
                         }
                     }
-                }
             }
         }
         .padding(.top, 4)
     }
 
-    // MARK: - Cells（✅ ここが最大の変更点：TodayPhotoStorage直読みを廃止）
+    // MARK: - Cells（week/month）
 
     private func dayCell(for date: Date, entryMap: [String: TodayPhotoEntry]) -> some View {
         let key = AppState.makeDayKey(date)
         let entry = entryMap[key]
         let isToday = cal.isDateInToday(date)
 
-        // ✅ まずキャッシュを見る
-        let cached = viewModel.image(for: key)
+        let cached = viewModel.thumbnailImage(for: key)
 
         return VStack(spacing: 2) {
             Text(dayNumber(for: date))
@@ -222,13 +242,14 @@ struct MemoriesView: View {
                     Image(uiImage: img)
                         .resizable()
                         .scaledToFill()
-                } else if entry != nil {
-                    // エントリはあるが未ロード：プレースホルダ（読み込み中）
+                } else if let entry {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color.white.opacity(0.28))
-                        .overlay {
-                            ProgressView()
-                                .tint(.white.opacity(0.9))
+                        .overlay { ProgressView().tint(.white.opacity(0.9)) }
+                        .onAppear {
+                            if viewModel.thumbnailImage(for: key) == nil {
+                                viewModel.loadThumbnailIfNeeded(dayKey: key, fileName: entry.fileName)
+                            }
                         }
                 } else {
                     RoundedRectangle(cornerRadius: 8)
@@ -258,67 +279,13 @@ struct MemoriesView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            if let entry {
-                viewModel.select(entry: entry)
-            }
-        }
-        .onAppear {
-            // ✅ 表示されたセルだけ遅延ロード
-            guard let entry else { return }
-            if viewModel.image(for: key) == nil {
-                viewModel.loadImageIfNeeded(dayKey: key, fileName: entry.fileName)
-            }
-        }
-    }
-
-    private func yearDayCell(for date: Date, entryMap: [String: TodayPhotoEntry]) -> some View {
-        let key = AppState.makeDayKey(date)
-        let entry = entryMap[key]
-        let isToday = cal.isDateInToday(date)
-
-        let cached = viewModel.image(for: key)
-
-        return ZStack(alignment: .topLeading) {
-            if let img = cached {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-            } else if entry != nil {
-                Color.white.opacity(0.18)
-                    .overlay {
-                        ProgressView().tint(.white.opacity(0.9))
-                    }
-            } else {
-                Color.white.opacity(0.18)
-            }
-
-            Text(dayNumber(for: date))
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.85))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-                .background(.black.opacity(0.25), in: Capsule())
-                .padding(6)
-        }
-        .frame(height: DisplayMode.year.cellHeight)
-        .clipShape(RoundedRectangle(cornerRadius: DisplayMode.year.cellCornerRadius))
-        .overlay {
-            if isToday {
-                RoundedRectangle(cornerRadius: DisplayMode.year.cellCornerRadius)
-                    .stroke(Color.white.opacity(0.9), lineWidth: 2)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if let entry {
-                viewModel.select(entry: entry)
-            }
-        }
-        .onAppear {
-            guard let entry else { return }
-            if viewModel.image(for: key) == nil {
-                viewModel.loadImageIfNeeded(dayKey: key, fileName: entry.fileName)
-            }
+            guard entry != nil else { return }
+            // ✅ week/month は「その日の最新」から開く（initialFileName=nil）
+            sheetItem = DayPhotosSheetItem(
+                dayKey: key,
+                initialFileName: nil,
+                titleText: dayTitleText(key)
+            )
         }
     }
 
@@ -332,8 +299,8 @@ struct MemoriesView: View {
             return "\(shortLabel(first)) 〜 \(shortLabel(last))"
         case .month:
             return monthTitle(for: focusDate)
-        case .year:
-            return "\(cal.component(.year, from: focusDate))年"
+        case .day:
+            return "すべて"
         }
     }
 
@@ -343,8 +310,8 @@ struct MemoriesView: View {
             focusDate = cal.date(byAdding: .weekOfYear, value: amount, to: focusDate) ?? focusDate
         case .month:
             focusDate = cal.date(byAdding: .month, value: amount, to: focusDate) ?? focusDate
-        case .year:
-            focusDate = cal.date(byAdding: .year, value: amount, to: focusDate) ?? focusDate
+        case .day:
+            break
         }
     }
 
@@ -355,7 +322,6 @@ struct MemoriesView: View {
         return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
     }
 
-    /// ✅ 7列×n行に揃える（月末 trailing の nil を追加）
     private func monthSlots(for date: Date) -> [Date?] {
         guard let monthInterval = cal.dateInterval(of: .month, for: date) else { return [] }
         let monthStart = monthInterval.start
@@ -400,7 +366,7 @@ struct MemoriesView: View {
         return Array(symbols[startIndex...] + symbols[..<startIndex])
     }
 
-    private func makeEntryMap(_ entries: [TodayPhotoEntry]) -> [String: TodayPhotoEntry] {
+    private func makeEntryMapLatestPerDay(_ entries: [TodayPhotoEntry]) -> [String: TodayPhotoEntry] {
         entries.reduce(into: [:]) { dict, e in
             if let existing = dict[e.dayKey] {
                 if e.date > existing.date { dict[e.dayKey] = e }
@@ -409,43 +375,86 @@ struct MemoriesView: View {
             }
         }
     }
-}
 
-// MARK: - Detail
+    private func dayTitleText(_ dayKey: String) -> String {
+        if dayKey.count == 8 {
+            let y = dayKey.prefix(4)
+            let m = dayKey.dropFirst(4).prefix(2)
+            let d = dayKey.suffix(2)
+            return "\(y)/\(m)/\(d)"
+        }
+        return dayKey
+    }
 
-private struct MemoryDetail: View {
-    let entry: TodayPhotoEntry
-    let image: UIImage?
-    let titleText: String
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color(red: 0.35, green: 0.86, blue: 0.88).ignoresSafeArea()
-
-                VStack {
-                    if let image {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .padding()
-                    } else {
-                        Text("画像を読み込めませんでした")
-                            .foregroundStyle(.secondary)
-                            .padding()
-                    }
-                    Spacer()
-                }
-            }
-            .navigationTitle(titleText)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("閉じる") { dismiss() }
-                }
-            }
+    // MARK: - Toast
+    private func toast(_ message: String) {
+        toastMessage = message
+        withAnimation(.easeInOut(duration: 0.2)) { showToast = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            withAnimation(.easeInOut(duration: 0.2)) { showToast = false }
         }
     }
+}
+
+// MARK: - Day Row
+
+private struct DayRow: View {
+    let entry: TodayPhotoEntry
+    let thumb: UIImage?
+
+    private let bg = Color.white.opacity(0.22)
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if let thumb {
+                    Image(uiImage: thumb)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Color.white.opacity(0.18)
+                        .overlay { ProgressView().tint(.white.opacity(0.9)) }
+                }
+            }
+            .frame(width: 88, height: 88)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(label(entry.date))
+                    .font(.headline)
+                Text(sub(entry))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(bg, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func label(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ja_JP")
+        f.dateFormat = "yyyy/MM/dd"
+        return f.string(from: date)
+    }
+
+    private func sub(_ entry: TodayPhotoEntry) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ja_JP")
+        f.dateFormat = "HH:mm"
+        return "撮影 \(f.string(from: entry.date))"
+    }
+}
+
+// MARK: - Sheet Item
+private struct DayPhotosSheetItem: Identifiable {
+    let dayKey: String
+    let initialFileName: String?
+    let titleText: String
+    var id: String { dayKey + "|" + (initialFileName ?? "latest") }
 }

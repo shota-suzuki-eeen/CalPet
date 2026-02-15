@@ -807,13 +807,23 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - 今日の一枚
+    // MARK: - ✅ 今日の一枚（同日複数に対応）
+    private func makeUniquePhotoFileName(dayKey: String, now: Date) -> String {
+        // ✅ ファイル名に安全で一意になりやすい millis を採用（同日複数でも上書きされない）
+        let ms = Int64(now.timeIntervalSince1970 * 1000)
+        return "\(dayKey)_\(ms).jpg"
+    }
+
     private func loadTodayPhoto() {
         let key = AppState.makeDayKey(Date())
         do {
-            let descriptor = FetchDescriptor<TodayPhotoEntry>(
-                predicate: #Predicate { $0.dayKey == key }
+            // ✅ 同日の中で date が最新の1件をサムネにする
+            var descriptor = FetchDescriptor<TodayPhotoEntry>(
+                predicate: #Predicate { $0.dayKey == key },
+                sortBy: [SortDescriptor(\TodayPhotoEntry.date, order: .reverse)]
             )
+            descriptor.fetchLimit = 1
+
             let found = try modelContext.fetch(descriptor).first
             todayPhotoEntry = found
             if let fileName = found?.fileName {
@@ -827,34 +837,28 @@ struct HomeView: View {
         }
     }
 
-    /// ✅ ここだけは「SwiftData保存失敗」を握りつぶさず検知する
+    /// ✅ 同日複数撮影：毎回 “新規エントリ追加” + サムネは常に最新になる
     private func saveTodayPhoto(_ uiImage: UIImage) {
         do {
             let key = AppState.makeDayKey(Date())
-            let fileName = "\(key).jpg"
+            let now = Date()
+
+            // ✅ ここが変更点：上書きしないファイル名
+            let fileName = makeUniquePhotoFileName(dayKey: key, now: now)
 
             try TodayPhotoStorage.saveJPEG(uiImage, fileName: fileName, quality: 0.9)
 
-            let now = Date()
-            let descriptor = FetchDescriptor<TodayPhotoEntry>(
-                predicate: #Predicate { $0.dayKey == key }
-            )
-            let existing = try modelContext.fetch(descriptor).first
-
-            if let existing {
-                existing.date = now
-                existing.fileName = fileName
-                todayPhotoEntry = existing
-            } else {
-                let created = TodayPhotoEntry(dayKey: key, date: now, fileName: fileName)
-                modelContext.insert(created)
-                todayPhotoEntry = created
-            }
+            // ✅ ここが変更点：既存を更新せず、必ず新規insert（同日に複数枚を保持）
+            let created = TodayPhotoEntry(dayKey: key, date: now, fileName: fileName)
+            modelContext.insert(created)
 
             // ✅ ここが重要：握りつぶさず “確実に保存”
             try modelContext.save()
 
+            // ✅ 保存直後のサムネ（最新）として反映
+            todayPhotoEntry = created
             todayPhotoImage = uiImage
+
             toast("今日の一枚を保存しました")
             Task { @MainActor in
                 Haptics.rattle(duration: 0.18, style: .light)

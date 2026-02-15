@@ -1,13 +1,16 @@
 import Foundation
 import Combine
 import UIKit
+import Photos
 
 @MainActor
 final class MemoriesViewModel: ObservableObject {
-    @Published var selectedEntry: TodayPhotoEntry?
-    @Published var selectedImage: UIImage?
+    // ✅ “タップした日” を保持（同日複数閲覧の起点）
+    @Published var selectedDayKey: String?
 
-    /// グリッド用：dayKey -> UIImage（サムネ/原寸どちらでも）
+    /// グリッド/リスト用キャッシュ
+    /// - dayKey のサムネ用途は "day:\(dayKey)"
+    /// - fileName の個別用途は "file:\(fileName)"
     @Published private(set) var imageCache: [String: UIImage] = [:]
 
     /// 読み込み中の二重起動防止
@@ -24,86 +27,116 @@ final class MemoriesViewModel: ObservableObject {
         return f
     }()
 
+    private let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ja_JP")
+        f.timeZone = .current
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
     // MARK: - Public
-
-    func select(entry: TodayPhotoEntry) {
-        selectedEntry = entry
-
-        // すでにキャッシュがあれば即表示
-        if let cached = cachedImage(for: entry.dayKey) {
-            selectedImage = cached
-            return
-        }
-
-        // 無ければ読み込み
-        loadImageIfNeeded(dayKey: entry.dayKey, fileName: entry.fileName, alsoSetSelected: true)
-    }
 
     func labelText(for date: Date) -> String {
         dateFormatter.string(from: date)
     }
 
-    /// グリッド側から「この日の画像が必要」と要求されたときに呼ぶ
-    func loadImageIfNeeded(dayKey: String, fileName: String) {
-        loadImageIfNeeded(dayKey: dayKey, fileName: fileName, alsoSetSelected: false)
+    func timeText(for date: Date) -> String {
+        timeFormatter.string(from: date)
     }
 
-    /// グリッド側が使う：キャッシュにあれば返す
-    func image(for dayKey: String) -> UIImage? {
-        cachedImage(for: dayKey)
+    // ✅ dayKeyサムネ（最新1枚）用
+    func thumbnailImage(for dayKey: String) -> UIImage? {
+        cachedImage(for: "day:\(dayKey)")
     }
 
-    /// メモリを節約したい時に呼べる（例：年表示に切替時など）
-    func clearInMemoryCache(keepSelected: Bool = true) {
-        let keepKey = keepSelected ? selectedEntry?.dayKey : nil
+    func loadThumbnailIfNeeded(dayKey: String, fileName: String) {
+        loadImageIfNeeded(cacheKey: "day:\(dayKey)", fileName: fileName)
+    }
+
+    // ✅ fileName 個別用（同日複数ビューで使う）
+    func image(forFileName fileName: String) -> UIImage? {
+        cachedImage(for: "file:\(fileName)")
+    }
+
+    func loadImageIfNeeded(fileName: String) {
+        loadImageIfNeeded(cacheKey: "file:\(fileName)", fileName: fileName)
+    }
+
+    /// メモリを節約したい時に呼べる（例：表示切替時など）
+    func clearInMemoryCache(keepSelectedDay: Bool = true) {
+        let keepDay = keepSelectedDay ? selectedDayKey : nil
 
         imageCache.removeAll(keepingCapacity: false)
         nsCache.removeAllObjects()
         loadingKeys.removeAll()
 
-        if let keepKey, let img = selectedImage {
-            imageCache[keepKey] = img
-            nsCache.setObject(img, forKey: keepKey as NSString)
+        // keepDay のサムネを残す（残っていれば）
+        if let keepDay, let img = nsCache.object(forKey: ("day:\(keepDay)" as NSString)) {
+            imageCache["day:\(keepDay)"] = img
         }
     }
 
-    // MARK: - Private
+    // ✅ 写真アプリへ保存（右下ボタン）
+    func saveToPhotos(_ image: UIImage) async throws {
+        let status = await requestAddOnlyAuthorizationIfNeeded()
 
-    private func cachedImage(for dayKey: String) -> UIImage? {
-        if let img = imageCache[dayKey] { return img }
-        if let img = nsCache.object(forKey: dayKey as NSString) {
-            imageCache[dayKey] = img
+        guard status == .authorized || status == .limited else {
+            throw NSError(
+                domain: "MemoriesViewModel",
+                code: 10,
+                userInfo: [NSLocalizedDescriptionKey: "写真への追加が許可されていません。設定から許可してください。"]
+            )
+        }
+
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.creationRequestForAsset(from: image)
+        }
+    }
+
+    // MARK: - Private (cache)
+
+    private func cachedImage(for cacheKey: String) -> UIImage? {
+        if let img = imageCache[cacheKey] { return img }
+        if let img = nsCache.object(forKey: cacheKey as NSString) {
+            imageCache[cacheKey] = img
             return img
         }
         return nil
     }
 
-    private func loadImageIfNeeded(dayKey: String, fileName: String, alsoSetSelected: Bool) {
-        // すでにあるなら終了
-        if let img = cachedImage(for: dayKey) {
-            if alsoSetSelected { selectedImage = img }
-            return
-        }
+    private func loadImageIfNeeded(cacheKey: String, fileName: String) {
+        if let _ = cachedImage(for: cacheKey) { return }
 
-        // 読み込み中なら終了
-        if loadingKeys.contains(dayKey) { return }
-        loadingKeys.insert(dayKey)
+        if loadingKeys.contains(cacheKey) { return }
+        loadingKeys.insert(cacheKey)
 
-        // ディスク読み込みはバックグラウンドへ
         Task.detached(priority: .utility) {
             let img = TodayPhotoStorage.loadImage(fileName: fileName)
 
             await MainActor.run {
-                self.loadingKeys.remove(dayKey)
+                self.loadingKeys.remove(cacheKey)
 
                 guard let img else { return }
 
-                self.imageCache[dayKey] = img
-                self.nsCache.setObject(img, forKey: dayKey as NSString)
+                self.imageCache[cacheKey] = img
+                self.nsCache.setObject(img, forKey: cacheKey as NSString)
+            }
+        }
+    }
 
-                if alsoSetSelected, self.selectedEntry?.dayKey == dayKey {
-                    self.selectedImage = img
-                }
+    // MARK: - Private (Photos auth)
+
+    private func requestAddOnlyAuthorizationIfNeeded() async -> PHAuthorizationStatus {
+        // iOS 14+ は addOnly が使える（追加だけ許可）
+        let current = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        if current == .authorized || current == .limited || current == .denied || current == .restricted {
+            return current
+        }
+
+        return await withCheckedContinuation { cont in
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                cont.resume(returning: status)
             }
         }
     }
