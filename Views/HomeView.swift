@@ -404,13 +404,20 @@ struct HomeView: View {
             Button("キャンセル", role: .cancel) {}
         }
         .fullScreenCover(item: $selectedCaptureMode) { mode in
-            CameraCaptureView(initialMode: mode) {
+            CameraCaptureView(
+                initialMode: mode,
+                todaySteps: hk.todaySteps,
+                todayActiveKcal: hk.todayActiveEnergyKcal,
+                todayTotalKcal: hk.todayTotalEnergyKcal,
+                plainBackgroundAssetName: Layout.homeBackgroundAssetName
+            ) {
                 selectedCaptureMode = nil
             } onCapture: { image in
                 saveTodayPhoto(image)
                 selectedCaptureMode = nil
             }
         }
+
         .task {
             state.ensureInitialPetsIfNeeded()
 

@@ -6,7 +6,6 @@ import RealityKit
 
 struct CameraCaptureView: View {
 
-    // ✅ completion に UIImage? を返すだけの “撮影関数”
     typealias Snapshotter = (@escaping (UIImage?) -> Void) -> Void
 
     enum Mode: String, Identifiable {
@@ -20,22 +19,108 @@ struct CameraCaptureView: View {
     let onCancel: () -> Void
     let onCapture: (UIImage) -> Void
 
+    enum MetricDisplay: CaseIterable, Equatable {
+        case none
+        case totalKcal
+        case activeKcal
+        case steps
+
+        var next: MetricDisplay {
+            let all = Self.allCases
+            guard let idx = all.firstIndex(of: self) else { return .none }
+            return all[(idx + 1) % all.count]
+        }
+
+        var title: String {
+            switch self {
+            case .none: return "なし"
+            case .totalKcal: return "TOTAL"
+            case .activeKcal: return "ACTIVE"
+            case .steps: return "STEPS"
+            }
+        }
+
+        var unit: String {
+            switch self {
+            case .none: return ""
+            case .totalKcal, .activeKcal: return "kcal"
+            case .steps: return "steps"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .none: return "nosign"
+            case .totalKcal: return "flame.fill"
+            case .activeKcal: return "bolt.fill"
+            case .steps: return "figure.walk"
+            }
+        }
+    }
+
+    // ✅ 追加：Metric文字色（白/黒）
+    enum MetricTextColor: Equatable {
+        case white
+        case black
+
+        var toggled: MetricTextColor { self == .white ? .black : .white }
+
+        /// 一目で分かるマーク：半分塗りの円（白/黒の切替を直感的に表現）
+        var systemImage: String { "circle.lefthalf.filled" }
+
+        var foreground: UIColor { self == .white ? .white : .black }
+        var titleOpacity: CGFloat { self == .white ? 0.92 : 0.92 }
+        var unitOpacity: CGFloat { self == .white ? 0.78 : 0.78 }
+
+        var swiftUIColor: Color { self == .white ? .white : .black }
+        var titleSwiftUIColor: Color { swiftUIColor.opacity(titleOpacity) }
+        var unitSwiftUIColor: Color { swiftUIColor.opacity(unitOpacity) }
+    }
+
+    let todaySteps: Int
+    let todayActiveKcal: Int
+    let todayTotalKcal: Int
+    let plainBackgroundAssetName: String
+
     @State private var mode: Mode
 
-    // キャラ操作
     @State private var characterOffset: CGSize = .zero
     @State private var characterScale: CGFloat = 1.0
     @State private var lastOffset: CGSize = .zero
     @State private var lastScale: CGFloat = 1.0
 
-    // ✅ Representable 側から注入される “撮影関数”
-    @State private var takeBackgroundSnapshot: Snapshotter?
+    @State private var sliderScale: Double = 1.0
+    @State private var metricDisplay: MetricDisplay = .none
 
-    // 連打防止
+    // ✅ 追加：デフォルト白
+    @State private var metricTextColor: MetricTextColor = .white
+
+    private enum CameraPosition { case front, back }
+    @State private var cameraPosition: CameraPosition = .back
+
+    @State private var lastViewSize: CGSize = .zero
+    @State private var takeBackgroundSnapshot: Snapshotter?
     @State private var isCapturing: Bool = false
 
-    init(initialMode: Mode, onCancel: @escaping () -> Void, onCapture: @escaping (UIImage) -> Void) {
+    // ✅ GeometryReaderのsafeAreaInsetsに依存しない
+    @State private var windowSafeTop: CGFloat = 0
+    @State private var windowSafeBottom: CGFloat = 0
+    @State private var windowSafeTrailing: CGFloat = 0
+
+    init(
+        initialMode: Mode,
+        todaySteps: Int,
+        todayActiveKcal: Int,
+        todayTotalKcal: Int,
+        plainBackgroundAssetName: String,
+        onCancel: @escaping () -> Void,
+        onCapture: @escaping (UIImage) -> Void
+    ) {
         self.initialMode = initialMode
+        self.todaySteps = todaySteps
+        self.todayActiveKcal = todayActiveKcal
+        self.todayTotalKcal = todayTotalKcal
+        self.plainBackgroundAssetName = plainBackgroundAssetName
         self.onCancel = onCancel
         self.onCapture = onCapture
         _mode = State(initialValue: initialMode)
@@ -46,15 +131,18 @@ struct CameraCaptureView: View {
             let characterW = min(geo.size.width * 0.45, 220)
 
             ZStack {
-                // ✅ 背景（AR/カメラ）
-                captureSurface
-                    .ignoresSafeArea()
-                    .background(Color.black)
+                Color.black.ignoresSafeArea()
 
-            }
-            // ✅ UIは overlay で上に固定（重なり順を確実に）
-            .overlay(alignment: .center) {
-                // キャラ（プレビュー用）
+                backgroundContainer
+                    .onAppear {
+                        lastViewSize = geo.size
+                        updateWindowSafeArea()
+                    }
+                    .onChange(of: geo.size) { _, newValue in
+                        lastViewSize = newValue
+                        updateWindowSafeArea()
+                    }
+
                 Image("purpor")
                     .resizable()
                     .scaledToFit()
@@ -62,45 +150,157 @@ struct CameraCaptureView: View {
                     .scaleEffect(characterScale)
                     .offset(characterOffset)
                     .gesture(characterGesture)
+                    .zIndex(10)
+
+                // ✅ 画面表示はこのまま（これが正）
+                MetricOverlayView(
+                    display: metricDisplay,
+                    steps: todaySteps,
+                    activeKcal: todayActiveKcal,
+                    totalKcal: todayTotalKcal,
+                    textColor: metricTextColor
+                )
+                .allowsHitTesting(false)
+                .zIndex(999)
             }
+            .ignoresSafeArea()
+
             .overlay(alignment: .top) {
-                HStack {
-                    Button("閉じる") { onCancel() }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(.black.opacity(0.5), in: Capsule())
+                topBar
+                    .padding(.top, windowSafeTop + 8)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
 
-                    Spacer()
-
-                    Picker("撮影", selection: $mode) {
-                        ForEach([Mode.ar, .plain]) { m in
-                            Text(m.title).tag(m)
+            // ✅ 右下：サイズ調整（セーフエリア考慮）
+            // ✅ 追加：スライダーの上に「文字色切替ボタン」（Metric ON のときだけ）
+            .overlay(alignment: .bottomTrailing) {
+                VStack(spacing: 10) {
+                    if metricDisplay != .none {
+                        Button {
+                            metricTextColor = metricTextColor.toggled
+                        } label: {
+                            // ボタンの見た目はMetric切替ボタンと同じピル型
+                            IconPillButton(systemImage: metricTextColor.systemImage, isEnabled: true)
+                                // 一目で分かるように、アイコン自体を現在の色に寄せる
+                                .foregroundStyle(metricTextColor.swiftUIColor.opacity(1.0))
                         }
+                        .accessibilityLabel(metricTextColor == .white ? "文字色を黒に" : "文字色を白に")
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 170)
+
+                    VerticalScaleSlider(
+                        value: $sliderScale,
+                        sliderLength: 200,
+                        compact: true
+                    )
+                    .frame(width: 40)
                 }
-                .foregroundStyle(.white)
-                .padding()
+                .padding(.trailing, 14 + windowSafeTrailing)
+                .padding(.bottom, 60 + windowSafeBottom)
+                .zIndex(200)
             }
+
             .overlay(alignment: .bottom) {
-                Button {
-                    captureSnapshot(viewSize: geo.size)
-                } label: {
-                    ZStack {
-                        Circle().fill(Color.white.opacity(0.28)).frame(width: 78, height: 78)
-                        Circle().fill(Color.white).frame(width: 62, height: 62)
-                    }
-                }
-                .disabled(isCapturing || takeBackgroundSnapshot == nil)
-                .opacity((isCapturing || takeBackgroundSnapshot == nil) ? 0.6 : 1.0)
-                .padding(.bottom, 40)
+                shutterButton
+                    .padding(.bottom, 40 + windowSafeBottom)
+                    .zIndex(300)
             }
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            sliderScale = Double(characterScale)
+            updateWindowSafeArea()
+        }
+        .onChange(of: sliderScale) { _, newValue in
+            let clamped = max(0.4, min(2.8, newValue))
+            characterScale = CGFloat(clamped)
+            lastScale = characterScale
         }
         .onChange(of: mode) { _, _ in
-            // ✅ モード切替時に古い snapshotter を使わないようクリア
             takeBackgroundSnapshot = nil
+            if mode == .plain { cameraPosition = .back }
+            updateWindowSafeArea()
         }
+        .onChange(of: characterScale) { _, newValue in
+            sliderScale = Double(newValue)
+        }
+    }
+
+    // MARK: - Window Safe Area
+
+    private func updateWindowSafeArea() {
+        let insets = Self.currentWindowSafeAreaInsets()
+        windowSafeTop = insets.top
+        windowSafeBottom = insets.bottom
+        windowSafeTrailing = insets.right
+    }
+
+    private static func currentWindowSafeAreaInsets() -> UIEdgeInsets {
+        let scenes = UIApplication.shared.connectedScenes
+        let windowScene = scenes.compactMap { $0 as? UIWindowScene }.first
+        let window = windowScene?.windows.first(where: { $0.isKeyWindow }) ?? windowScene?.windows.first
+        return window?.safeAreaInsets ?? .zero
+    }
+
+    // MARK: - Background Container
+
+    @ViewBuilder
+    private var backgroundContainer: some View {
+        ZStack { captureSurface }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+    }
+
+    // MARK: - Top Bar
+
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            Button(action: { onCancel() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(12)
+                    .background(.black.opacity(0.5), in: Circle())
+                    .contentShape(Circle())
+            }
+
+            Spacer()
+
+            Button { metricDisplay = metricDisplay.next } label: {
+                IconPillButton(systemImage: metricDisplay.systemImage, isEnabled: true)
+            }
+
+            Button {
+                guard mode == .ar else { return }
+                cameraPosition = (cameraPosition == .back) ? .front : .back
+                takeBackgroundSnapshot = nil
+            } label: {
+                let icon = (cameraPosition == .back) ? "camera.rotate" : "camera.rotate.fill"
+                IconPillButton(systemImage: icon, isEnabled: mode == .ar)
+            }
+            .disabled(mode == .plain)
+
+            Picker("撮影", selection: $mode) {
+                ForEach([Mode.ar, .plain]) { m in
+                    Text(m.title).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 170)
+        }
+    }
+
+    // MARK: - Shutter
+
+    private var shutterButton: some View {
+        Button { captureSnapshot(viewSize: lastViewSize) } label: {
+            ZStack {
+                Circle().fill(Color.white.opacity(0.28)).frame(width: 78, height: 78)
+                Circle().fill(Color.white).frame(width: 62, height: 62)
+            }
+        }
+        .disabled(isCapturing || takeBackgroundSnapshot == nil)
+        .opacity((isCapturing || takeBackgroundSnapshot == nil) ? 0.6 : 1.0)
     }
 
     // MARK: - Background Surface
@@ -108,19 +308,29 @@ struct CameraCaptureView: View {
     @ViewBuilder
     private var captureSurface: some View {
         if mode == .ar {
-            ARCameraBackgroundView { snapshotter in
-                // ✅ makeUIView中のState更新を避ける
-                DispatchQueue.main.async {
-                    self.takeBackgroundSnapshot = snapshotter
+            if cameraPosition == .back {
+                ARCameraBackgroundView { snapshotter in
+                    DispatchQueue.main.async { self.takeBackgroundSnapshot = snapshotter }
                 }
+                .id("ar_back")
+            } else {
+                CameraPreviewView(position: .front) { snapshotter in
+                    DispatchQueue.main.async { self.takeBackgroundSnapshot = snapshotter }
+                }
+                .id("cam_front")
             }
         } else {
-            CameraPreviewView { snapshotter in
-                // ✅ makeUIView中のState更新を避ける
-                DispatchQueue.main.async {
-                    self.takeBackgroundSnapshot = snapshotter
+            PlainHomeBackgroundView(assetName: plainBackgroundAssetName)
+                .onAppear {
+                    self.takeBackgroundSnapshot = { completion in
+                        completion(renderPlainBackground(assetName: plainBackgroundAssetName, viewSize: lastViewSize))
+                    }
                 }
-            }
+                .onChange(of: lastViewSize) { _, _ in
+                    self.takeBackgroundSnapshot = { completion in
+                        completion(renderPlainBackground(assetName: plainBackgroundAssetName, viewSize: lastViewSize))
+                    }
+                }
         }
     }
 
@@ -147,41 +357,63 @@ struct CameraCaptureView: View {
     // MARK: - Capture
 
     private func captureSnapshot(viewSize: CGSize) {
+        guard viewSize.width > 1, viewSize.height > 1 else { return }
         guard !isCapturing else { return }
         guard let takeBackgroundSnapshot else { return }
+
+        // ✅ シャッター押下時点で“保存に使う値”を固定
+        let fixedMetric = metricDisplay
+        let fixedColor = metricTextColor
+        let fixedSteps = todaySteps
+        let fixedActive = todayActiveKcal
+        let fixedTotal = todayTotalKcal
+        let fixedOffset = characterOffset
+        let fixedScale = characterScale
+
+        // ✅ 先にMetric UIImageを確実に作る（ボタンUIは写らない／Metric表示だけ反映）
+        let fixedMetricImage: UIImage? = {
+            guard fixedMetric != .none else { return nil }
+            return renderMetricOverlayAsImage(
+                viewSize: viewSize,
+                display: fixedMetric,
+                steps: fixedSteps,
+                activeKcal: fixedActive,
+                totalKcal: fixedTotal,
+                textColor: fixedColor
+            )
+        }()
 
         isCapturing = true
 
         takeBackgroundSnapshot { background in
-            defer {
-                DispatchQueue.main.async { self.isCapturing = false }
-            }
-
+            defer { DispatchQueue.main.async { self.isCapturing = false } }
             guard let background else { return }
 
+            let normalizedBackground = background
+                .fixedOrientation()
+                .croppedToAspectFill(of: viewSize) ?? background.fixedOrientation()
+
             let composed = composeFinalImage(
-                background: background,
+                background: normalizedBackground,
                 viewSize: viewSize,
-                characterOffset: characterOffset,
-                characterScale: characterScale
+                characterOffset: fixedOffset,
+                characterScale: fixedScale,
+                metricOverlayImage: fixedMetricImage
             )
 
-            DispatchQueue.main.async {
-                onCapture(composed)
-            }
+            DispatchQueue.main.async { onCapture(composed) }
         }
     }
 
-    /// 背景UIImage（カメラ/ARの実画像）に、UIで見えている purpor を同じ見た目で合成
     private func composeFinalImage(
         background: UIImage,
         viewSize: CGSize,
         characterOffset: CGSize,
-        characterScale: CGFloat
+        characterScale: CGFloat,
+        metricOverlayImage: UIImage?
     ) -> UIImage {
 
         let bgSize = background.size
-
         let sx = bgSize.width / max(viewSize.width, 1)
         let sy = bgSize.height / max(viewSize.height, 1)
 
@@ -195,7 +427,6 @@ struct CameraCaptureView: View {
 
         let centerXInView = viewSize.width / 2 + characterOffset.width
         let centerYInView = viewSize.height / 2 + characterOffset.height
-
         let centerX = centerXInView * sx
         let centerY = centerYInView * sy
 
@@ -206,41 +437,257 @@ struct CameraCaptureView: View {
             height: characterHeight
         )
 
-        let renderer = UIGraphicsImageRenderer(size: bgSize)
-        return renderer.image { _ in
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = background.scale
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(size: bgSize, format: format)
+        return renderer.image { ctx in
             background.draw(in: CGRect(origin: .zero, size: bgSize))
             purpor.draw(in: drawRect)
+
+            if let metricOverlayImage {
+                ctx.cgContext.saveGState()
+                ctx.cgContext.scaleBy(x: sx, y: sy)
+                metricOverlayImage.draw(in: CGRect(origin: .zero, size: viewSize))
+                ctx.cgContext.restoreGState()
+            }
+        }
+    }
+
+    private func renderMetricOverlayAsImage(
+        viewSize: CGSize,
+        display: MetricDisplay,
+        steps: Int,
+        activeKcal: Int,
+        totalKcal: Int,
+        textColor: MetricTextColor
+    ) -> UIImage? {
+        guard viewSize.width > 1, viewSize.height > 1 else { return nil }
+        guard display != .none else { return nil }
+
+        let content = MetricOverlayView(
+            display: display,
+            steps: steps,
+            activeKcal: activeKcal,
+            totalKcal: totalKcal,
+            textColor: textColor
+        )
+        .ignoresSafeArea()
+        .frame(width: viewSize.width, height: viewSize.height)
+        .background(Color.clear)
+
+        if #available(iOS 16.0, *) {
+            let renderer = ImageRenderer(content: content)
+            renderer.proposedSize = ProposedViewSize(width: viewSize.width, height: viewSize.height)
+            renderer.scale = UIScreen.main.scale
+            renderer.isOpaque = false
+            return renderer.uiImage
+        }
+
+        let host = UIHostingController(rootView: content)
+        host.view.backgroundColor = .clear
+        host.view.bounds = CGRect(origin: .zero, size: viewSize)
+        host.additionalSafeAreaInsets = .zero
+        host.view.insetsLayoutMarginsFromSafeArea = false
+        host.view.layoutMargins = .zero
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = UIScreen.main.scale
+        format.opaque = false
+        let r = UIGraphicsImageRenderer(size: viewSize, format: format)
+        return r.image { ctx in
+            host.view.layer.render(in: ctx.cgContext)
+        }
+    }
+
+    private func renderPlainBackground(assetName: String, viewSize: CGSize) -> UIImage? {
+        guard viewSize.width > 1, viewSize.height > 1 else { return nil }
+        guard let img = UIImage(named: assetName) else { return nil }
+
+        let scale = UIScreen.main.scale
+        let targetSize = CGSize(width: viewSize.width * scale, height: viewSize.height * scale)
+
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        return renderer.image { _ in
+            let imgSize = img.size
+            let s = max(targetSize.width / max(imgSize.width, 1), targetSize.height / max(imgSize.height, 1))
+            let drawW = imgSize.width * s
+            let drawH = imgSize.height * s
+            let rect = CGRect(
+                x: (targetSize.width - drawW) / 2,
+                y: (targetSize.height - drawH) / 2,
+                width: drawW,
+                height: drawH
+            )
+            img.draw(in: rect)
         }
     }
 }
 
-// MARK: - Plain Camera (AVCapturePhotoOutput)
+// MARK: - UI Parts
+
+private struct IconPillButton: View {
+    let systemImage: String
+    let isEnabled: Bool
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 17, weight: .bold))
+            .foregroundStyle(.white.opacity(isEnabled ? 1.0 : 0.55))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.black.opacity(0.5), in: Capsule())
+            .contentShape(Capsule())
+    }
+}
+
+private struct VerticalScaleSlider: View {
+    @Binding var value: Double
+    let sliderLength: CGFloat
+    let compact: Bool
+
+    var body: some View {
+        VStack(spacing: compact ? 8 : 10) {
+            Image(systemName: "plus")
+                .font(.system(size: compact ? 12 : 14, weight: .bold))
+                .foregroundStyle(.white)
+
+            ZStack {
+                Slider(value: $value, in: 0.4...2.8)
+                    .frame(width: sliderLength)
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: compact ? 18 : 22, height: sliderLength)
+            .clipped()
+
+            Image(systemName: "minus")
+                .font(.system(size: compact ? 12 : 14, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .padding(.vertical, compact ? 10 : 12)
+        .padding(.horizontal, compact ? 6 : 8)
+        .background(.black.opacity(0.35), in: Capsule())
+    }
+}
+
+private struct MetricOverlayView: View {
+    let display: CameraCaptureView.MetricDisplay
+    let steps: Int
+    let activeKcal: Int
+    let totalKcal: Int
+    let textColor: CameraCaptureView.MetricTextColor
+
+    private var value: String {
+        switch display {
+        case .none: return ""
+        case .totalKcal: return "\(totalKcal)"
+        case .activeKcal: return "\(activeKcal)"
+        case .steps: return "\(steps)"
+        }
+    }
+
+    var body: some View {
+        if display != .none {
+            VStack(spacing: 6) {
+                Text(display.title)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(textColor.titleSwiftUIColor)
+
+                Text(value)
+                    .font(.system(size: 92, weight: .black))
+                    .italic()
+                    .foregroundStyle(textColor.swiftUIColor)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+
+                Text(display.unit)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(textColor.unitSwiftUIColor)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, 40)
+        }
+    }
+}
+
+private struct PlainHomeBackgroundView: View {
+    let assetName: String
+    var body: some View {
+        Image(assetName)
+            .resizable()
+            .scaledToFill()
+            .ignoresSafeArea()
+    }
+}
+
+// MARK: - ✅ UIImage helpers（向き補正 + aspectFillクロップ）
+
+private extension UIImage {
+
+    func fixedOrientation() -> UIImage {
+        guard imageOrientation != .up else { return self }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = scale
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
+    func croppedToAspectFill(of viewSize: CGSize) -> UIImage? {
+        guard let cg = self.cgImage else { return nil }
+        guard viewSize.width > 0, viewSize.height > 0 else { return nil }
+
+        let imgW = CGFloat(cg.width)
+        let imgH = CGFloat(cg.height)
+
+        let targetAspect = viewSize.width / viewSize.height
+        let imgAspect = imgW / imgH
+
+        var crop: CGRect
+        if imgAspect > targetAspect {
+            let newW = imgH * targetAspect
+            let x = (imgW - newW) / 2
+            crop = CGRect(x: x, y: 0, width: newW, height: imgH)
+        } else {
+            let newH = imgW / targetAspect
+            let y = (imgH - newH) / 2
+            crop = CGRect(x: 0, y: y, width: imgW, height: newH)
+        }
+
+        guard let croppedCG = cg.cropping(to: crop.integral) else { return nil }
+        return UIImage(cgImage: croppedCG, scale: self.scale, orientation: .up)
+    }
+}
+
+// MARK: - Plain Camera
 
 private struct CameraPreviewView: UIViewRepresentable {
     typealias Snapshotter = CameraCaptureView.Snapshotter
-
-    /// ✅ 親に「撮影関数」を渡す（snapshotter は外に保持されるので @escaping）
     let onSnapshotReady: (@escaping Snapshotter) -> Void
 
-    init(onSnapshotReady: @escaping (@escaping Snapshotter) -> Void) {
+    enum Position { case front, back }
+    let position: Position
+
+    init(position: Position = .back, onSnapshotReady: @escaping (@escaping Snapshotter) -> Void) {
+        self.position = position
         self.onSnapshotReady = onSnapshotReady
     }
 
     func makeUIView(context: Context) -> PreviewUIView {
-        let view = PreviewUIView()
-
-        // ✅ UIKit側でもタッチを完全遮断（ここが重要）
+        let view = PreviewUIView(position: position)
         view.isUserInteractionEnabled = false
-
         view.startRunning()
 
-        // ✅ makeUIView中の即時コールを避ける（State更新の警告回避）
         DispatchQueue.main.async {
             onSnapshotReady { completion in
                 view.capturePhoto(completion: completion)
             }
         }
-
         return view
     }
 
@@ -257,12 +704,22 @@ private struct CameraPreviewView: UIViewRepresentable {
         private let photoOutput = AVCapturePhotoOutput()
         private var photoCompletion: ((UIImage?) -> Void)?
 
+        private let position: Position
+
+        init(position: Position) {
+            self.position = position
+            super.init(frame: .zero)
+            setupSession()
+        }
+
         override init(frame: CGRect) {
+            self.position = .back
             super.init(frame: frame)
             setupSession()
         }
 
         required init?(coder: NSCoder) {
+            self.position = .back
             super.init(coder: coder)
             setupSession()
         }
@@ -278,7 +735,11 @@ private struct CameraPreviewView: UIViewRepresentable {
             layer.addSublayer(previewLayer)
 
             guard
-                let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+                let device = AVCaptureDevice.default(
+                    .builtInWideAngleCamera,
+                    for: .video,
+                    position: position == .front ? .front : .back
+                ),
                 let input = try? AVCaptureDeviceInput(device: device),
                 session.canAddInput(input)
             else { return }
@@ -290,29 +751,23 @@ private struct CameraPreviewView: UIViewRepresentable {
             if session.canAddOutput(photoOutput) {
                 session.addOutput(photoOutput)
             }
-
             session.commitConfiguration()
         }
 
         func startRunning() {
             DispatchQueue.global(qos: .userInitiated).async {
-                if !self.session.isRunning {
-                    self.session.startRunning()
-                }
+                if !self.session.isRunning { self.session.startRunning() }
             }
         }
 
         func stopRunning() {
             DispatchQueue.global(qos: .userInitiated).async {
-                if self.session.isRunning {
-                    self.session.stopRunning()
-                }
+                if self.session.isRunning { self.session.stopRunning() }
             }
         }
 
         func capturePhoto(completion: @escaping (UIImage?) -> Void) {
             photoCompletion = completion
-
             let settings = AVCapturePhotoSettings()
             settings.flashMode = .off
             photoOutput.capturePhoto(with: settings, delegate: self)
@@ -335,12 +790,10 @@ private struct CameraPreviewView: UIViewRepresentable {
     }
 }
 
-// MARK: - AR Background (ARView.snapshot)
+// MARK: - AR Background
 
 private struct ARCameraBackgroundView: UIViewRepresentable {
     typealias Snapshotter = CameraCaptureView.Snapshotter
-
-    /// ✅ 親に「撮影関数」を渡す（snapshotter は外に保持されるので @escaping）
     let onSnapshotReady: (@escaping Snapshotter) -> Void
 
     init(onSnapshotReady: @escaping (@escaping Snapshotter) -> Void) {
@@ -349,8 +802,6 @@ private struct ARCameraBackgroundView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> ARView {
         let view = ARView(frame: .zero)
-
-        // ✅ UIKit側でもタッチを完全遮断（ここが重要）
         view.isUserInteractionEnabled = false
 
         let config = ARWorldTrackingConfiguration()
@@ -360,15 +811,11 @@ private struct ARCameraBackgroundView: UIViewRepresentable {
         view.session.run(config)
         view.renderOptions.insert(.disableMotionBlur)
 
-        // ✅ makeUIView中の即時コールを避ける（State更新の警告回避）
         DispatchQueue.main.async {
             onSnapshotReady { completion in
-                view.snapshot(saveToHDR: false) { img in
-                    completion(img)
-                }
+                view.snapshot(saveToHDR: false) { img in completion(img) }
             }
         }
-
         return view
     }
 
