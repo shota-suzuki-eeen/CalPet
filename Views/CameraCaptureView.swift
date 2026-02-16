@@ -3,6 +3,8 @@ import UIKit
 import AVFoundation
 import ARKit
 import RealityKit
+import CoreLocation
+import Combine   // ✅ ObservableObject のために必要
 
 struct CameraCaptureView: View {
 
@@ -17,7 +19,13 @@ struct CameraCaptureView: View {
 
     let initialMode: Mode
     let onCancel: () -> Void
+
+    /// 既存（互換用）
     let onCapture: (UIImage) -> Void
+
+    /// ✅ 追加：撮影場所も一緒に返す（HomeView側が後で対応できるように）
+    /// - placeName は取得できない/拒否された場合 nil
+    let onCaptureWithPlace: ((UIImage, String?) -> Void)?
 
     enum MetricDisplay: CaseIterable, Equatable {
         case none
@@ -64,13 +72,11 @@ struct CameraCaptureView: View {
         case black
 
         var toggled: MetricTextColor { self == .white ? .black : .white }
-
-        /// 一目で分かるマーク：半分塗りの円（白/黒の切替を直感的に表現）
         var systemImage: String { "circle.lefthalf.filled" }
 
         var foreground: UIColor { self == .white ? .white : .black }
-        var titleOpacity: CGFloat { self == .white ? 0.92 : 0.92 }
-        var unitOpacity: CGFloat { self == .white ? 0.78 : 0.78 }
+        var titleOpacity: CGFloat { 0.92 }
+        var unitOpacity: CGFloat { 0.78 }
 
         var swiftUIColor: Color { self == .white ? .white : .black }
         var titleSwiftUIColor: Color { swiftUIColor.opacity(titleOpacity) }
@@ -107,6 +113,9 @@ struct CameraCaptureView: View {
     @State private var windowSafeBottom: CGFloat = 0
     @State private var windowSafeTrailing: CGFloat = 0
 
+    // ✅ 追加：位置情報（撮影場所名の取得）
+    @StateObject private var locationProvider = LocationProvider()
+
     init(
         initialMode: Mode,
         todaySteps: Int,
@@ -114,7 +123,8 @@ struct CameraCaptureView: View {
         todayTotalKcal: Int,
         plainBackgroundAssetName: String,
         onCancel: @escaping () -> Void,
-        onCapture: @escaping (UIImage) -> Void
+        onCapture: @escaping (UIImage) -> Void,
+        onCaptureWithPlace: ((UIImage, String?) -> Void)? = nil
     ) {
         self.initialMode = initialMode
         self.todaySteps = todaySteps
@@ -123,6 +133,7 @@ struct CameraCaptureView: View {
         self.plainBackgroundAssetName = plainBackgroundAssetName
         self.onCancel = onCancel
         self.onCapture = onCapture
+        self.onCaptureWithPlace = onCaptureWithPlace
         _mode = State(initialValue: initialMode)
     }
 
@@ -137,6 +148,8 @@ struct CameraCaptureView: View {
                     .onAppear {
                         lastViewSize = geo.size
                         updateWindowSafeArea()
+                        // ✅ 位置情報：必要ならここで許可を促す（拒否でもOK）
+                        locationProvider.prepare()
                     }
                     .onChange(of: geo.size) { _, newValue in
                         lastViewSize = newValue
@@ -180,9 +193,7 @@ struct CameraCaptureView: View {
                         Button {
                             metricTextColor = metricTextColor.toggled
                         } label: {
-                            // ボタンの見た目はMetric切替ボタンと同じピル型
                             IconPillButton(systemImage: metricTextColor.systemImage, isEnabled: true)
-                                // 一目で分かるように、アイコン自体を現在の色に寄せる
                                 .foregroundStyle(metricTextColor.swiftUIColor.opacity(1.0))
                         }
                         .accessibilityLabel(metricTextColor == .white ? "文字色を黒に" : "文字色を白に")
@@ -210,6 +221,7 @@ struct CameraCaptureView: View {
         .onAppear {
             sliderScale = Double(characterScale)
             updateWindowSafeArea()
+            locationProvider.prepare()
         }
         .onChange(of: sliderScale) { _, newValue in
             let clamped = max(0.4, min(2.8, newValue))
@@ -401,7 +413,17 @@ struct CameraCaptureView: View {
                 metricOverlayImage: fixedMetricImage
             )
 
-            DispatchQueue.main.async { onCapture(composed) }
+            // ✅ ここで撮影場所名を取得して返す（未許可/失敗なら nil）
+            Task {
+                let placeName = await locationProvider.currentPlaceName(timeoutSeconds: 1.2)
+                await MainActor.run {
+                    if let onCaptureWithPlace {
+                        onCaptureWithPlace(composed, placeName)
+                    } else {
+                        onCapture(composed) // 既存互換
+                    }
+                }
+            }
         }
     }
 
@@ -661,6 +683,106 @@ private extension UIImage {
 
         guard let croppedCG = cg.cropping(to: crop.integral) else { return nil }
         return UIImage(cgImage: croppedCG, scale: self.scale, orientation: .up)
+    }
+}
+
+// MARK: - ✅ Location Provider（撮影場所名）
+
+@MainActor
+private final class LocationProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private let geocoder = CLGeocoder()
+
+    private var latestLocation: CLLocation?
+    private var didRequestAuth = false
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
+
+    func prepare() {
+        guard !didRequestAuth else { return }
+        didRequestAuth = true
+
+        let status = manager.authorizationStatus
+        switch status {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.startUpdatingLocation()
+        case .denied, .restricted:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    func currentPlaceName(timeoutSeconds: Double) async -> String? {
+        // 許可が無いなら即 nil
+        let status = manager.authorizationStatus
+        guard status == .authorizedAlways || status == .authorizedWhenInUse else { return nil }
+
+        // 位置を少し待つ（最大 timeout）
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        if latestLocation == nil {
+            manager.startUpdatingLocation()
+        }
+        while latestLocation == nil && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+        guard let loc = latestLocation else { return nil }
+
+        // ✅ 逆ジオは「String? 専用」のタイムアウトで安全に返す（Anyキャスト禁止）
+        return await reverseGeocodeWithTimeout(location: loc, seconds: timeoutSeconds)
+    }
+
+    private func reverseGeocodeWithTimeout(location: CLLocation, seconds: Double) async -> String? {
+        await withTaskGroup(of: String?.self) { group in
+            group.addTask { [geocoder] in
+                do {
+                    let placemarks = try await geocoder.reverseGeocodeLocation(location)
+                    let pm = placemarks.first
+                    // ここは好みに応じて調整OK（例：施設名優先→市区町村）
+                    return pm?.name
+                        ?? pm?.locality
+                        ?? pm?.administrativeArea
+                } catch {
+                    return nil
+                }
+            }
+
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+
+            let value = await group.next() ?? nil
+            group.cancelAll()
+            return value
+        }
+    }
+
+    // CLLocationManagerDelegate
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        switch status {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.startUpdatingLocation()
+        default:
+            break
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        latestLocation = locations.last
+        // 省電力：一度取れたら止める（必要なら撮影時にまた start する）
+        manager.stopUpdatingLocation()
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // 失敗は握りつぶして nil 扱いにする
     }
 }
 

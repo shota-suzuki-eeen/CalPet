@@ -8,6 +8,10 @@ final class MemoriesViewModel: ObservableObject {
     // ✅ “タップした日” を保持（同日複数閲覧の起点）
     @Published var selectedDayKey: String?
 
+    /// ✅ トースト通知（View側が購読して表示する）
+    /// - 例：保存成功時に "保存しました！" を流す
+    @Published var toastMessage: String?
+
     /// グリッド/リスト用キャッシュ
     /// - dayKey のサムネ用途は "day:\(dayKey)"
     /// - fileName の個別用途は "file:\(fileName)"
@@ -78,20 +82,35 @@ final class MemoriesViewModel: ObservableObject {
     }
 
     // ✅ 写真アプリへ保存（右下ボタン）
+    // ✅ 成功したら toastMessage に "保存しました！" を流す
     func saveToPhotos(_ image: UIImage) async throws {
         let status = await requestAddOnlyAuthorizationIfNeeded()
 
         guard status == .authorized || status == .limited else {
-            throw NSError(
+            let err = NSError(
                 domain: "MemoriesViewModel",
                 code: 10,
                 userInfo: [NSLocalizedDescriptionKey: "写真への追加が許可されていません。設定から許可してください。"]
             )
+            toastMessage = err.localizedDescription
+            throw err
         }
 
-        try await PHPhotoLibrary.shared().performChanges {
-            PHAssetChangeRequest.creationRequestForAsset(from: image)
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            }
+            // ✅ 要件：保存後に表示
+            toastMessage = "保存しました！"
+        } catch {
+            toastMessage = "保存に失敗しました"
+            throw error
         }
+    }
+
+    /// ✅ View側で表示し終わったら呼ぶ（同じメッセージが再発火しないように）
+    func consumeToast() {
+        toastMessage = nil
     }
 
     // MARK: - Private (cache)

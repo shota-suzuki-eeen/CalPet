@@ -64,8 +64,13 @@ struct DayPhotosView: View {
                                             onDownload: { img in
                                                 Task {
                                                     do {
+                                                        // ✅ ViewModel側で toastMessage = "保存しました！" を流す
                                                         try await viewModel.saveToPhotos(img)
-                                                        onToast("保存完了しました") // ✅ 要望：成功メッセージ
+
+                                                        // ✅ 互換のため残す（ViewModel未改修でもOK）
+                                                        // ただし、ViewModel側でtoastを出す場合は二重表示になるので、
+                                                        // ここでは出さず「購読」で統一するのが安全。
+                                                        // onToast("保存しました！")
                                                     } catch {
                                                         onToast(error.localizedDescription)
                                                     }
@@ -104,6 +109,13 @@ struct DayPhotosView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("閉じる") { dismiss() }
                 }
+            }
+
+            // ✅ ViewModelのtoastMessageを購読して、保存成功/失敗を一元表示
+            .onChange(of: viewModel.toastMessage) { _, msg in
+                guard let msg else { return }
+                onToast(msg)
+                viewModel.consumeToast()
             }
         }
     }
