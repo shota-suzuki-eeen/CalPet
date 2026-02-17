@@ -21,6 +21,10 @@ struct DayPhotosView: View {
 
     @Query private var dayEntries: [TodayPhotoEntry]
 
+    // ✅ 追加：保存完了を画面中央に出す
+    @State private var centerToastMessage: String?
+    @State private var showCenterToast: Bool = false
+
     init(
         dayKey: String,
         initialFileName: String?,
@@ -61,16 +65,15 @@ struct DayPhotosView: View {
                                             entry: e,
                                             image: viewModel.image(forFileName: e.fileName),
                                             timeText: viewModel.timeText(for: e.date),
+                                            placeTitleText: placeTitleText(for: e),
                                             onDownload: { img in
                                                 Task {
                                                     do {
-                                                        // ✅ ViewModel側で toastMessage = "保存しました！" を流す
                                                         try await viewModel.saveToPhotos(img)
 
-                                                        // ✅ 互換のため残す（ViewModel未改修でもOK）
-                                                        // ただし、ViewModel側でtoastを出す場合は二重表示になるので、
-                                                        // ここでは出さず「購読」で統一するのが安全。
-                                                        // onToast("保存しました！")
+                                                        // ✅ 仕様：保存完了を画面中央に表示
+                                                        showCenterToastNow("保存しました！")
+
                                                     } catch {
                                                         onToast(error.localizedDescription)
                                                     }
@@ -101,21 +104,70 @@ struct DayPhotosView: View {
                             }
                         }
                     }
+
+                    // ✅ 画面中央トースト（保存完了など）
+                    if showCenterToast, let centerToastMessage {
+                        CenterToastView(message: centerToastMessage)
+                            .transition(.opacity.combined(with: .scale))
+                            .zIndex(9999)
+                    }
                 }
             }
-            .navigationTitle(titleText)
+
+            // ✅ 修正：ナビゲーションバーに “写真情報のタイトル” を出さない
+            // （赤丸部分を消すため、title は空にする）
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+
             .toolbar {
+                // ✅ 修正：中央（principal）も空にして、上部に文字が残らないようにする
+                ToolbarItem(placement: .principal) {
+                    Color.clear.frame(width: 0, height: 0)
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("閉じる") { dismiss() }
                 }
             }
 
-            // ✅ ViewModelのtoastMessageを購読して、保存成功/失敗を一元表示
+            // ✅ 既存：ViewModelのtoastMessageを購読（ただし「保存しました！」は中央表示で統一）
             .onChange(of: viewModel.toastMessage) { _, msg in
                 guard let msg else { return }
-                onToast(msg)
+
+                if msg.contains("保存しました") {
+                    showCenterToastNow("保存しました！")
+                } else {
+                    onToast(msg)
+                }
                 viewModel.consumeToast()
+            }
+        }
+    }
+
+    // MARK: - Title formatting
+
+    /// ✅ カードタイトル（旧：撮影 HH:mm）→（新：場所 の おもいで）
+    private func placeTitleText(for entry: TodayPhotoEntry) -> String {
+        let raw = entry.placeName?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let raw, !raw.isEmpty {
+            return "\(raw) の おもいで"
+        } else {
+            // 位置情報が無い/拒否/未取得の場合
+            return "おもいで"
+        }
+    }
+
+    // MARK: - Center toast
+
+    private func showCenterToastNow(_ message: String) {
+        centerToastMessage = message
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showCenterToast = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showCenterToast = false
             }
         }
     }
@@ -125,16 +177,26 @@ private struct PhotoPage: View {
     let entry: TodayPhotoEntry
     let image: UIImage?
     let timeText: String
+
+    // ✅ 追加：場所タイトル
+    let placeTitleText: String
+
     let onDownload: (UIImage) -> Void
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 Spacer().frame(height: 10)
 
-                Text("撮影 \(timeText)")
+                // ✅ 仕様変更：タイトルを場所に（バーではなく画面内に表示）
+                Text(placeTitleText)
                     .font(.headline)
                     .foregroundStyle(.primary)
+
+                // ✅ 時刻は残したい場合はサブ表示（既存を壊さない）
+                Text("撮影 \(timeText)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
 
                 if let image {
                     Image(uiImage: image)
@@ -168,5 +230,27 @@ private struct PhotoPage: View {
                 .padding(.bottom, 16)
             }
         }
+    }
+}
+
+// ✅ 画面中央表示用トースト
+private struct CenterToastView: View {
+    let message: String
+
+    var body: some View {
+        VStack {
+            Text(message)
+                .font(.headline)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(.black.opacity(0.82), in: Capsule())
+                .shadow(radius: 10)
+
+            // ちょい下に余白（視認性）
+            Spacer().frame(height: 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .allowsHitTesting(false)
     }
 }

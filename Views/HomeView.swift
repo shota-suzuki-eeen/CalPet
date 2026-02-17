@@ -290,11 +290,9 @@ struct HomeView: View {
                             }
 
                             // 5) 下部：横ボタン群
-                            // ✅ TimelineView の Content 推論を安定させるため by は Double に寄せる
                             TimelineView(.periodic(from: Date(), by: 60.0)) { timeline in
                                 let now = timeline.date
 
-                                // ✅ 表示用Stateから判定（body評価中に AppState を書き換える呼び出しはしない）
                                 let canFood = (displayedSatisfaction < Layout.satisfactionSegments)
                                 let canBath = isBathAvailablePure(now: now)
                                 let canWc = (state.toiletFlagAt != nil)
@@ -315,16 +313,12 @@ struct HomeView: View {
                                     horizontalPadding: Layout.bottomHorizontalPadding
                                 )
                                 .onChange(of: timeline.date) { _, newDate in
-                                    // ✅ “refreshSatisfactionIfNeeded” に依存しない（AppState差分で壊れないように）
                                     displayedSatisfaction = state.currentSatisfaction(now: newDate)
-
-                                    // 日跨ぎリセットはイベント側で
                                     state.ensureDailyResetIfNeeded(now: newDate)
                                     save()
                                 }
                                 .onAppear {
                                     displayedSatisfaction = state.currentSatisfaction(now: now)
-
                                     state.ensureDailyResetIfNeeded(now: now)
                                     save()
                                 }
@@ -413,7 +407,12 @@ struct HomeView: View {
             ) {
                 selectedCaptureMode = nil
             } onCapture: { image in
-                saveTodayPhoto(image)
+                // ✅ 旧互換：場所が取れない構成でも従来通り保存できる
+                saveTodayPhoto(image, placeName: nil, latitude: nil, longitude: nil)
+                selectedCaptureMode = nil
+            } onCaptureWithPlace: { image, placeName, lat, lon in
+                // ✅ 追加：撮影場所を一緒に保存（placeNameは施設名優先 / 無ければ都道府県+市区町村）
+                saveTodayPhoto(image, placeName: placeName, latitude: lat, longitude: lon)
                 selectedCaptureMode = nil
             }
         }
@@ -431,7 +430,6 @@ struct HomeView: View {
             displayedTodayKcal = todayKcal
             displayedWalletKcal = state.walletKcal
 
-            // ✅ ここも refreshSatisfactionIfNeeded 依存を外す
             displayedSatisfaction = state.currentSatisfaction(now: Date())
 
             displayedFriendship = Double(state.friendshipPoint)
@@ -527,7 +525,6 @@ struct HomeView: View {
 
     // MARK: - ✅ Bath availability（純参照：body内で安全に使える）
     private func isBathAvailablePure(now: Date) -> Bool {
-        // ensureDailyResetIfNeeded は呼ばない（= 書き換えない）
         guard let last = state.bathLastAt else { return true }
         let elapsed = now.timeIntervalSince(last)
         return elapsed >= (8 * 60 * 60)
@@ -635,7 +632,6 @@ struct HomeView: View {
             return false
         }
 
-        // ✅ 満足度MAXなら不可
         let check = state.canFeedNow(now: Date())
         guard check.can else {
             toast(check.reason ?? "今はご飯できません")
@@ -809,7 +805,6 @@ struct HomeView: View {
 
     // MARK: - ✅ 今日の一枚（同日複数に対応）
     private func makeUniquePhotoFileName(dayKey: String, now: Date) -> String {
-        // ✅ ファイル名に安全で一意になりやすい millis を採用（同日複数でも上書きされない）
         let ms = Int64(now.timeIntervalSince1970 * 1000)
         return "\(dayKey)_\(ms).jpg"
     }
@@ -817,7 +812,6 @@ struct HomeView: View {
     private func loadTodayPhoto() {
         let key = AppState.makeDayKey(Date())
         do {
-            // ✅ 同日の中で date が最新の1件をサムネにする
             var descriptor = FetchDescriptor<TodayPhotoEntry>(
                 predicate: #Predicate { $0.dayKey == key },
                 sortBy: [SortDescriptor(\TodayPhotoEntry.date, order: .reverse)]
@@ -837,25 +831,40 @@ struct HomeView: View {
         }
     }
 
-    /// ✅ 同日複数撮影：毎回 “新規エントリ追加” + サムネは常に最新になる
-    private func saveTodayPhoto(_ uiImage: UIImage) {
+    // ✅ 追加：placeName の空文字を安全に潰す（"" や "   " は nil 扱い）
+    private func normalizePlaceName(_ placeName: String?) -> String? {
+        guard let placeName else { return nil }
+        let t = placeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+    /// ✅ 追加：placeName / latitude / longitude を保存できるようにする（nilでも従来通り動く）
+    private func saveTodayPhoto(
+        _ uiImage: UIImage,
+        placeName: String?,
+        latitude: Double?,
+        longitude: Double?
+    ) {
         do {
             let key = AppState.makeDayKey(Date())
             let now = Date()
 
-            // ✅ ここが変更点：上書きしないファイル名
             let fileName = makeUniquePhotoFileName(dayKey: key, now: now)
 
             try TodayPhotoStorage.saveJPEG(uiImage, fileName: fileName, quality: 0.9)
 
-            // ✅ ここが変更点：既存を更新せず、必ず新規insert（同日に複数枚を保持）
-            let created = TodayPhotoEntry(dayKey: key, date: now, fileName: fileName)
+            let created = TodayPhotoEntry(
+                dayKey: key,
+                date: now,
+                fileName: fileName,
+                placeName: normalizePlaceName(placeName), // ✅ ここだけ安全化
+                latitude: latitude,
+                longitude: longitude
+            )
             modelContext.insert(created)
 
-            // ✅ ここが重要：握りつぶさず “確実に保存”
             try modelContext.save()
 
-            // ✅ 保存直後のサムネ（最新）として反映
             todayPhotoEntry = created
             todayPhotoImage = uiImage
 
@@ -891,7 +900,6 @@ struct HomeView: View {
     private func onTapBath(state: AppState) {
         let now = Date()
 
-        // ✅ アクション前に日跨ぎ処理だけはここで確実に行う（イベント側なのでOK）
         state.ensureDailyResetIfNeeded(now: now)
 
         let bath = state.canBathNow(now: now)

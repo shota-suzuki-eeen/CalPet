@@ -1,3 +1,10 @@
+//
+//  MemoriesView.swift
+//  Cal Pet
+//
+//  Created by shota suzuki on 2026/02/15.
+//
+
 import SwiftUI
 import SwiftData
 import UIKit
@@ -44,24 +51,51 @@ final class PlaceNameResolver: ObservableObject {
                     // 失敗時は保存しない（表示は「おもいで」にフォールバック）
                     return
                 }
-
                 guard let p = placemarks?.first else { return }
 
-                // ✅ “地名っぽい”順で採用（取れなければ何も入れない）
-                let name =
-                    p.locality ??
-                    p.subLocality ??
-                    p.administrativeArea ??
-                    p.name
+                // ✅ 施設名優先 → なければ「都道府県 + 市区町村」などを組み立てる
+                let composed = Self.composePlaceName(from: p)
 
-                guard
-                    let name,
-                    !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                guard let composed,
+                      !composed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 else { return }
 
-                self.placeNameByKey[key] = name
+                self.placeNameByKey[key] = composed
             }
         }
+    }
+
+    /// 仕様：施設などの名称がある場合はそれを優先。ない場合は「都道府県＋市区町村」など。
+    private static func composePlaceName(from p: CLPlacemark) -> String? {
+        // 1) 施設名っぽいもの（iOSでは areasOfInterest が取れることがある）
+        if let aois = p.areasOfInterest?.first,
+           !aois.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return aois
+        }
+
+        // 2) p.name が “施設名” として入るケースもある（ただし住所文字列のこともある）
+        //    → ここでは「都道府県」「市区町村」系が取れない時の補助として扱う
+        let admin = p.administrativeArea?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let locality = (p.locality ?? p.subAdministrativeArea ?? p.subLocality)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 3) 「都道府県 + 市区町村」(例: 千葉県船橋市)
+        // ✅ ここで型推論が崩れることがあるので、戻り型を明示して安定化
+        let parts: [String] = [admin, locality]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+
+        if !parts.isEmpty {
+            return parts.joined()
+        }
+
+        // 4) 最後の保険
+        if let name = p.name,
+           !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return name
+        }
+
+        return nil
     }
 }
 
@@ -152,7 +186,7 @@ struct MemoriesView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
 
-            // ✅ 保存/ダウンロード等のトースト：画面中央に表示
+            // ✅ 保存/ダウンロード等のトースト：画面中央に表示（最前面）
             if showToast, let toastMessage {
                 Text(toastMessage)
                     .font(.headline)
@@ -163,6 +197,8 @@ struct MemoriesView: View {
                     .clipShape(Capsule())
                     .shadow(radius: 10)
                     .transition(.opacity.combined(with: .scale))
+                    .zIndex(999)
+                    .allowsHitTesting(false)
             }
         }
         .navigationTitle("思い出")
@@ -298,11 +334,13 @@ struct MemoriesView: View {
         .padding(.top, 4)
     }
 
-    /// ✅ ForEach内の型推論を軽くするため分離（ここが今回のコンパイルエラー対策の本体）
+    /// ✅ ForEach内の型推論を軽くするため分離
     @ViewBuilder
     private func dayRowView(entry e: TodayPhotoEntry) -> some View {
         let key = placeKey(for: e)
-        let place = placeResolver.placeName(for: key)
+
+        // ✅ 保存済み placeName を最優先。なければ resolver の結果
+        let place = e.placeName ?? placeResolver.placeName(for: key)
 
         DayRow(
             entry: e,
@@ -310,10 +348,11 @@ struct MemoriesView: View {
             placeName: place
         )
         .onTapGesture {
+            // ✅ 仕様：シートのタイトルも「場所 の おもいで」
             sheetItem = DayPhotosSheetItem(
                 dayKey: e.dayKey,
                 initialFileName: e.fileName,
-                titleText: dayTitleText(e.dayKey)
+                titleText: sheetTitleText(placeName: place)
             )
         }
         .onAppear {
@@ -321,12 +360,14 @@ struct MemoriesView: View {
                 viewModel.loadImageIfNeeded(fileName: e.fileName)
             }
 
-            // ✅ 地名解決（取れなければ表示は「おもいで」）
-            placeResolver.resolveIfNeeded(
-                key: key,
-                latitude: e.latitude,
-                longitude: e.longitude
-            )
+            // ✅ 地名解決（placeNameが無い時だけ）
+            if e.placeName == nil {
+                placeResolver.resolveIfNeeded(
+                    key: key,
+                    latitude: e.latitude,
+                    longitude: e.longitude
+                )
+            }
         }
     }
 
@@ -347,6 +388,13 @@ struct MemoriesView: View {
             return nil
         }()
 
+        // ✅ monthタップ時のタイトル用：entry がある場合に place を引ける
+        let monthPlace: String? = {
+            guard let entry else { return nil }
+            let pKey = placeKey(for: entry)
+            return entry.placeName ?? placeResolver.placeName(for: pKey)
+        }()
+
         return VStack(spacing: 2) {
             Text(dayNumber(for: date))
                 .font(.caption2)
@@ -354,7 +402,6 @@ struct MemoriesView: View {
 
             Group {
                 if let img = cached {
-                    // ✅ 横写真でも「枠内に収める（はみ出さない）」表示
                     Image(uiImage: img)
                         .resizable()
                         .scaledToFit()
@@ -369,12 +416,14 @@ struct MemoriesView: View {
                                 viewModel.loadThumbnailIfNeeded(dayKey: key, fileName: entry.fileName)
                             }
 
-                            // ✅ 月表示でも先に地名解決しておく
-                            placeResolver.resolveIfNeeded(
-                                key: placeKey(for: entry),
-                                latitude: entry.latitude,
-                                longitude: entry.longitude
-                            )
+                            // ✅ 月表示でも先に地名解決しておく（placeNameが無い時だけ）
+                            if entry.placeName == nil {
+                                placeResolver.resolveIfNeeded(
+                                    key: placeKey(for: entry),
+                                    latitude: entry.latitude,
+                                    longitude: entry.longitude
+                                )
+                            }
                         }
                 } else {
                     RoundedRectangle(cornerRadius: 8)
@@ -404,11 +453,12 @@ struct MemoriesView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            guard entry != nil else { return }
+            guard let entry else { return }
             sheetItem = DayPhotosSheetItem(
                 dayKey: key,
                 initialFileName: nil,
-                titleText: dayTitleText(key)
+                // ✅ 仕様：月グリッドから開いても「場所 の おもいで」
+                titleText: sheetTitleText(placeName: monthPlace)
             )
         }
     }
@@ -507,6 +557,15 @@ struct MemoriesView: View {
     // ✅ placeName のキャッシュKey（同じ写真=同じfileNameでOK）
     private func placeKey(for entry: TodayPhotoEntry) -> String {
         entry.fileName
+    }
+
+    // ✅ シートのタイトル（場所優先）
+    private func sheetTitleText(placeName: String?) -> String {
+        let trimmed = placeName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            return "\(trimmed) の おもいで"
+        }
+        return "おもいで"
     }
 
     // MARK: - Midnight Refresh

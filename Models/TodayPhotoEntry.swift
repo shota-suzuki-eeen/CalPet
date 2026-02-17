@@ -13,10 +13,10 @@ import UIKit
 final class TodayPhotoEntry {
     // yyyyMMdd
     var dayKey: String
-    
+
     // 表示用（並び順・ラベル）
     var date: Date
-    
+
     // documents/memories/ のファイル名（例: 20260203.jpg）
     var fileName: String
 
@@ -43,6 +43,23 @@ final class TodayPhotoEntry {
         self.placeName = placeName
         self.latitude = latitude
         self.longitude = longitude
+    }
+
+    // MARK: - Display Helpers（表示統一）
+
+    /// placeName が空/未設定なら nil を返す（表示側でフォールバックしやすくする）
+    static func memoryTitlePlace(_ placeName: String?) -> String? {
+        guard let placeName else { return nil }
+        let trimmed = placeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// 仕様の1行目：「◯◯ の おもいで」 / 取れなければ「おもいで」
+    static func memoryTitleLine(_ placeName: String?) -> String {
+        if let place = memoryTitlePlace(placeName) {
+            return "\(place) の おもいで"
+        }
+        return "おもいで"
     }
 }
 
