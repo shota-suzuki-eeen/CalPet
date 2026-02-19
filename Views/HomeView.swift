@@ -23,8 +23,6 @@ struct HomeView: View {
 
     // 表示用
     @State private var todaySteps: Int = 0
-
-    // ✅ 今日の通貨kcal（Active + Basal 合計）を表示に使う
     @State private var todayKcal: Int = 0
 
     // ✅ リング中央表示（演出でカウントアップさせる）
@@ -63,37 +61,26 @@ struct HomeView: View {
     // ✅ Home表示中か（ショップ滞在中に onChange が走っても演出しない）
     @State private var isHomeVisible: Bool = false
 
-    // 進捗比較用
-    @State private var lastFriendshipPoint: Int = 0
-    @State private var lastTodayKcal: Int = 0
-
     // ✅ MAX到達時チケット演出
     @State private var showTicketOverlay: Bool = false
     @State private var ticketScale: CGFloat = 0.8
     @State private var ticketOpacity: Double = 0.0
     @State private var getOpacity: Double = 0.0
-
-    // ✅ get 回転用（get_a / get_b 共通の角度。get_b は逆回転で表示）
     @State private var getRotation: Double = 0.0
 
     // ✅ ごはん棚
     @State private var showFoodShelf: Bool = false
 
-    // ✅ ドロップターゲット演出（必要なら将来使える）
+    // ✅ ドロップターゲット演出
     @State private var isDropTargeted: Bool = false
 
     // =========================================================
-    // ✅ キャラクターアニメ（仕様追加：アイドルまばたき / タップジャンプ）
+    // ✅ キャラクターアニメ（アイドルまばたき / タップジャンプ）
     // =========================================================
     @State private var characterAssetName: String = "purpor"
-
-    /// アイドリング（まばたき）用ループTask
     @State private var idleLoopTask: Task<Void, Never>?
-
-    /// タップアクション（ジャンプ）中フラグ（アイドリング停止）
     @State private var isCharacterActionRunning: Bool = false
 
-    // ✅ 仕様追加：たまに2連続まばたき
     private let doubleBlinkChance: Double = 0.18
     private let doubleBlinkGapRange: ClosedRange<Double> = 0.18...0.45
 
@@ -115,12 +102,17 @@ struct HomeView: View {
         static let redMinWidth: CGFloat = 18
 
         // ✅ 満足度メーター（所持kcalの下）
-        static let satisfactionSpacingFromWallet: CGFloat = 8
+        static let satisfactionSpacingFromWallet: CGFloat = 16
         static let satisfactionBarWidth: CGFloat = 125
         static let satisfactionBarHeight: CGFloat = 10
         static let satisfactionSegments: Int = 3
         static let satisfactionSegmentGap: CGFloat = 4
         static let satisfactionCornerRadius: CGFloat = 4
+
+        // ✅ 満足度メーター用アイコン
+        static let satisfactionIconAssetName: String = "food_Icon"
+        static let satisfactionIconSize: CGFloat = 24
+        static let satisfactionIconSpacing: CGFloat = 10
 
         static let kcalRingTop: CGFloat = 36
         static let kcalRingTrailing: CGFloat = 18
@@ -159,6 +151,12 @@ struct HomeView: View {
         static let kcalCenterDividerHeight: CGFloat = 1
         static let kcalCenterDividerWidthRatio: CGFloat = 0.62
         static let kcalCenterSpacing: CGFloat = 4
+
+        // ✅ zIndex（前後関係固定）
+        static let zCharacter: Double = 50
+        static let zFoodOutsideTap: Double = 210
+        static let zFoodShelf: Double = 220
+        static let zTicket: Double = 300
     }
 
     var body: some View {
@@ -178,13 +176,23 @@ struct HomeView: View {
                         let characterWidth = min(geo.size.width * 0.62, Layout.characterMaxWidth)
 
                         ZStack {
+                            // ✅ ご飯テロップ表示中：テロップ外タップで閉じる（全面透明レイヤー）
+                            //  - FoodShelfPanel を zIndex で上に置くことで、テロップ内タップは閉じない
+                            if showFoodShelf {
+                                Color.black.opacity(0.001)
+                                    .ignoresSafeArea()
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { closeFoodShelf() }
+                                    .zIndex(Layout.zFoodOutsideTap)
+                            }
+
                             // 1) キャラクター
                             ZStack {
                                 Rectangle()
                                     .fill(Color.black.opacity(0.001))
                                     .frame(width: characterWidth, height: characterWidth * 1.15)
                                     .offset(y: Layout.characterTopOffset)
-                                    .zIndex(50)
+                                    .zIndex(Layout.zCharacter)
                                     .highPriorityGesture(
                                         TapGesture().onEnded { triggerCharacterJump() }
                                     )
@@ -200,7 +208,8 @@ struct HomeView: View {
                                         ) { item, _ in
                                             let id: String? = {
                                                 if let s = item as? String { return s }
-                                                if let data = item as? Data, let s = String(data: data, encoding: .utf8) { return s }
+                                                if let data = item as? Data,
+                                                   let s = String(data: data, encoding: .utf8) { return s }
                                                 if let url = item as? URL { return url.absoluteString }
                                                 return nil
                                             }()
@@ -246,7 +255,10 @@ struct HomeView: View {
                                         barWidth: Layout.satisfactionBarWidth,
                                         height: Layout.satisfactionBarHeight,
                                         gap: Layout.satisfactionSegmentGap,
-                                        cornerRadius: Layout.satisfactionCornerRadius
+                                        cornerRadius: Layout.satisfactionCornerRadius,
+                                        iconAssetName: Layout.satisfactionIconAssetName,
+                                        iconSize: Layout.satisfactionIconSize,
+                                        iconSpacing: Layout.satisfactionIconSpacing
                                     )
                                 }
 
@@ -286,7 +298,7 @@ struct HomeView: View {
                                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                                     .padding(.bottom, Layout.bottomPadding + Layout.foodShelfBottomGapFromButtons)
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                                    .onTapGesture { }
+                                    .zIndex(Layout.zFoodShelf)
                             }
 
                             // 5) 下部：横ボタン群
@@ -326,7 +338,7 @@ struct HomeView: View {
                             .padding(.bottom, Layout.bottomPadding)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
 
-                            // 6) チケット演出（省略なし）
+                            // 6) チケット演出
                             if showTicketOverlay {
                                 ZStack {
                                     Color.black.opacity(0.001)
@@ -368,18 +380,10 @@ struct HomeView: View {
                                 }
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                                 .transition(.opacity)
+                                .zIndex(Layout.zTicket)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                        .simultaneousGesture(
-                            TapGesture().onEnded {
-                                guard showFoodShelf else { return }
-                                withAnimation(.easeInOut(duration: 0.18)) {
-                                    showFoodShelf = false
-                                }
-                            }
-                        )
                         .overlay(alignment: .bottom) {
                             if showToast, let toastMessage {
                                 ToastView(message: toastMessage)
@@ -407,16 +411,13 @@ struct HomeView: View {
             ) {
                 selectedCaptureMode = nil
             } onCapture: { image in
-                // ✅ 旧互換：場所が取れない構成でも従来通り保存できる
                 saveTodayPhoto(image, placeName: nil, latitude: nil, longitude: nil)
                 selectedCaptureMode = nil
             } onCaptureWithPlace: { image, placeName, lat, lon in
-                // ✅ 追加：撮影場所を一緒に保存（placeNameは施設名優先 / 無ければ都道府県+市区町村）
                 saveTodayPhoto(image, placeName: placeName, latitude: lat, longitude: lon)
                 selectedCaptureMode = nil
             }
         }
-
         .task {
             state.ensureInitialPetsIfNeeded()
 
@@ -429,14 +430,10 @@ struct HomeView: View {
 
             displayedTodayKcal = todayKcal
             displayedWalletKcal = state.walletKcal
-
             displayedSatisfaction = state.currentSatisfaction(now: Date())
 
             displayedFriendship = Double(state.friendshipPoint)
             displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
-
-            lastFriendshipPoint = state.friendshipPoint
-            lastTodayKcal = todayKcal
 
             handleDayRolloverIfNeeded(state: state)
 
@@ -481,7 +478,10 @@ struct HomeView: View {
                     save()
 
                     withAnimation(.easeOut(duration: 0.35)) {
-                        displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
+                        displayedKcalProgress = calcKcalProgressRaw(
+                            todayKcal: displayedTodayKcal,
+                            goalKcal: state.dailyGoalKcal
+                        )
                     }
 
                     showGoalSheet = false
@@ -523,14 +523,21 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - ✅ Bath availability（純参照：body内で安全に使える）
-    private func isBathAvailablePure(now: Date) -> Bool {
-        guard let last = state.bathLastAt else { return true }
-        let elapsed = now.timeIntervalSince(last)
-        return elapsed >= (8 * 60 * 60)
+    // MARK: - FoodShelf
+    private func closeFoodShelf() {
+        guard showFoodShelf else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            showFoodShelf = false
+        }
     }
 
-    // MARK: - キャラクターアニメ制御（あなたのまま）
+    // MARK: - Bath availability（純参照：body内で安全に使える）
+    private func isBathAvailablePure(now: Date) -> Bool {
+        guard let last = state.bathLastAt else { return true }
+        return now.timeIntervalSince(last) >= (8 * 60 * 60)
+    }
+
+    // MARK: - Character animation
     private func startCharacterIdleLoopIfNeeded() {
         guard idleLoopTask == nil else { return }
 
@@ -627,6 +634,9 @@ struct HomeView: View {
 
     // MARK: - Drag & Drop（ごはん）
     private func handleFoodDrop(foodId: String, state: AppState) -> Bool {
+        // ✅ ご飯を「あげた（試みた）」時点で必ず閉じる（成功/失敗問わず）
+        defer { closeFoodShelf() }
+
         guard let food = FoodCatalog.byId(foodId) else {
             toast("ご飯が見つかりません")
             return false
@@ -658,13 +668,9 @@ struct HomeView: View {
         save()
 
         displayedSatisfaction = fed.after
-
         addFriendshipWithAnimation(points: 10, state: state)
         toast("\(food.name)をあげた！ +10")
 
-        withAnimation(.easeInOut(duration: 0.18)) {
-            showFoodShelf = false
-        }
         return true
     }
 
@@ -710,7 +716,6 @@ struct HomeView: View {
 
             let t = Double(i) / Double(frames)
             let eased = 1 - pow(1 - t, 3)
-
             let v = from - Int(Double(magnitude) * eased)
 
             await MainActor.run {
@@ -726,7 +731,7 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Friendship points（あなたのまま）
+    // MARK: - Friendship points
     private func addFriendshipWithAnimation(points: Int, state: AppState) {
         guard points > 0 else { return }
 
@@ -761,8 +766,6 @@ struct HomeView: View {
                 displayedFriendship = Double(after)
             }
         }
-
-        lastFriendshipPoint = after
     }
 
     private func triggerTicketOverlay() {
@@ -831,14 +834,12 @@ struct HomeView: View {
         }
     }
 
-    // ✅ 追加：placeName の空文字を安全に潰す（"" や "   " は nil 扱い）
     private func normalizePlaceName(_ placeName: String?) -> String? {
         guard let placeName else { return nil }
         let t = placeName.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t
     }
 
-    /// ✅ 追加：placeName / latitude / longitude を保存できるようにする（nilでも従来通り動く）
     private func saveTodayPhoto(
         _ uiImage: UIImage,
         placeName: String?,
@@ -857,7 +858,7 @@ struct HomeView: View {
                 dayKey: key,
                 date: now,
                 fileName: fileName,
-                placeName: normalizePlaceName(placeName), // ✅ ここだけ安全化
+                placeName: normalizePlaceName(placeName),
                 latitude: latitude,
                 longitude: longitude
             )
@@ -892,8 +893,15 @@ struct HomeView: View {
         Task { @MainActor in
             Haptics.rattle(duration: 0.12, style: .light)
         }
+
+        // ✅ 仕様：表示中に “ごはん” ボタンを押したら閉じる／非表示なら開く
+        if showFoodShelf {
+            closeFoodShelf()
+            return
+        }
+
         withAnimation(.easeInOut(duration: 0.18)) {
-            showFoodShelf.toggle()
+            showFoodShelf = true
         }
     }
 
@@ -1032,11 +1040,12 @@ struct HomeView: View {
             }
 
             withAnimation(.easeOut(duration: 0.25)) {
-                displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
+                displayedKcalProgress = calcKcalProgressRaw(
+                    todayKcal: displayedTodayKcal,
+                    goalKcal: state.dailyGoalKcal
+                )
             }
         }
-
-        lastTodayKcal = todayKcal
     }
 
     private func playGainAnimationIfNeeded(
@@ -1098,14 +1107,7 @@ struct HomeView: View {
     }
 }
 
-// MARK: - UI Parts（画像再現用）
-
-private struct BannerBar: View {
-    var body: some View {
-        Rectangle()
-            .fill(Color(red: 0.22, green: 0.24, blue: 0.28))
-    }
-}
+// MARK: - UI Parts
 
 private struct FriendshipMeter: View {
     let value: Double
@@ -1170,7 +1172,7 @@ private struct WalletCapsule: View {
                     .fill(Color.black.opacity(0.85))
                     .frame(width: barWidth, height: height)
 
-                Text("\(walletKcal) kcal")
+                Text("\(walletKcal)")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
                     .monospacedDigit()
@@ -1179,7 +1181,7 @@ private struct WalletCapsule: View {
     }
 }
 
-// ✅ 満足度メーター（3区切り）
+// ✅ 満足度メーター（3区切り）＋ 左アイコン(food_Icon)
 private struct SatisfactionMeter: View {
     let level: Int
     let maxLevel: Int
@@ -1188,6 +1190,10 @@ private struct SatisfactionMeter: View {
     let gap: CGFloat
     let cornerRadius: CGFloat
 
+    let iconAssetName: String
+    let iconSize: CGFloat
+    let iconSpacing: CGFloat
+
     private var clamped: Int { min(max(0, level), maxLevel) }
 
     var body: some View {
@@ -1195,18 +1201,25 @@ private struct SatisfactionMeter: View {
         let totalGap = gap * CGFloat(max(0, segments - 1))
         let segWidth = (barWidth - totalGap) / CGFloat(segments)
 
-        HStack(spacing: gap) {
-            ForEach(0..<segments, id: \.self) { idx in
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(idx < clamped ? Color.white.opacity(0.95) : Color.black.opacity(0.55))
-                    .frame(width: segWidth, height: height)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: cornerRadius)
-                            .stroke(Color.black.opacity(0.35), lineWidth: 1)
-                    )
+        HStack(spacing: iconSpacing) {
+            Image(iconAssetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: iconSize, height: iconSize)
+
+            HStack(spacing: gap) {
+                ForEach(0..<segments, id: \.self) { idx in
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(idx < clamped ? Color.green.opacity(0.95) : Color.black.opacity(0.55))
+                        .frame(width: segWidth, height: height)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: cornerRadius)
+                                .stroke(Color.black.opacity(0.35), lineWidth: 1)
+                        )
+                }
             }
+            .frame(width: barWidth, height: height, alignment: .leading)
         }
-        .frame(width: barWidth, height: height, alignment: .leading)
     }
 }
 
@@ -1218,9 +1231,7 @@ private struct KcalRing: View {
     let outerSize: CGFloat
     let innerSize: CGFloat
 
-    private var goalText: String {
-        goalKcal > 0 ? "\(goalKcal)" : "—"
-    }
+    private var goalText: String { goalKcal > 0 ? "\(goalKcal)" : "—" }
 
     private var lap1: CGFloat {
         CGFloat(min(1.0, max(0.0, progress)))
@@ -1461,9 +1472,19 @@ private struct GoalSettingSheet: View {
 private struct FoodShelfPanel: View {
     let state: AppState
 
+    @State private var currentPage: Int = 0
+
     private var ownedFoods: [FoodCatalog.FoodItem] {
         FoodCatalog.all.filter { state.foodCount(foodId: $0.id) > 0 }
     }
+
+    private var pages: [[FoodCatalog.FoodItem]] {
+        chunked(ownedFoods, size: 3)
+    }
+
+    private var pageCount: Int { pages.count }
+    private var canGoPrev: Bool { currentPage > 0 }
+    private var canGoNext: Bool { currentPage + 1 < pageCount }
 
     var body: some View {
         ZStack {
@@ -1479,21 +1500,83 @@ private struct FoodShelfPanel: View {
                     .foregroundStyle(.black.opacity(0.75))
                     .padding(.horizontal, 12)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(ownedFoods) { food in
-                            FoodItemCell(
-                                food: food,
-                                count: state.foodCount(foodId: food.id)
-                            )
+                ZStack {
+                    TabView(selection: $currentPage) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { idx, foods in
+                            HStack(spacing: 12) {
+                                ForEach(foods) { food in
+                                    FoodItemCell(
+                                        food: food,
+                                        count: state.foodCount(foodId: food.id)
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .tag(idx)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .onChange(of: pageCount) { _, _ in
+                        if currentPage >= pageCount {
+                            currentPage = max(0, pageCount - 1)
+                        }
+                    }
+
+                    HStack {
+                        arrowButton(systemName: "chevron.left", enabled: canGoPrev) {
+                            guard canGoPrev else { return }
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                currentPage -= 1
+                            }
+                        }
+
+                        Spacer()
+
+                        arrowButton(systemName: "chevron.right", enabled: canGoNext) {
+                            guard canGoNext else { return }
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                currentPage += 1
+                            }
                         }
                     }
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
                 }
             }
         }
         .frame(height: HomeView.Layout.foodShelfHeight)
+    }
+
+    private func chunked<T>(_ items: [T], size: Int) -> [[T]] {
+        guard size > 0, !items.isEmpty else { return [] }
+        var result: [[T]] = []
+        var i = 0
+        while i < items.count {
+            let end = min(i + size, items.count)
+            result.append(Array(items[i..<end]))
+            i = end
+        }
+        return result
+    }
+
+    @ViewBuilder
+    private func arrowButton(systemName: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 16, weight: .heavy))
+                .foregroundStyle(enabled ? Color.black.opacity(0.85) : Color.gray.opacity(0.55))
+                .frame(width: 26, height: 26)
+                .background(Color.white.opacity(enabled ? 0.72 : 0.35))
+                .clipShape(Circle())
+                .overlay(
+                    Circle().stroke(Color.black.opacity(enabled ? 0.28 : 0.12), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1.0 : 0.85)
+        .contentShape(Circle())
     }
 }
 
