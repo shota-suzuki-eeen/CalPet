@@ -20,7 +20,7 @@ final class MojaViewModel: ObservableObject {
     @Published private(set) var fusionIsRunning: Bool = false
     @Published private(set) var fusionEndAt: Date? = nil
 
-    /// fusion中：0〜(count-1) を 1秒ごとに回す
+    /// fusion中：0〜(count-1) を回す
     @Published private(set) var fusionFrameIndex: Int = 0
 
     /// 画面中央トースト用（View側で表示してOK）
@@ -35,13 +35,16 @@ final class MojaViewModel: ObservableObject {
     /// 6時間
     private let fusionDuration: TimeInterval = 6 * 60 * 60
 
-    /// 1秒ごとの切り替え用（仕様：moja → A → B → C → moja...）
+    /// 画像切り替え（仕様：moja → A → B → C → moja...）
     let fusionFrameAssetNames: [String] = [
         "moja",
         "moja_fusionA",
         "moja_fusionB",
         "moja_fusionC"
     ]
+
+    // ✅ 1秒Ticker（安定化：TimerではなくTaskで回す）
+    private var tickerTask: Task<Void, Never>?
 
     // MARK: - Storage Keys
 
@@ -58,6 +61,15 @@ final class MojaViewModel: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         loadFromStorage()
+
+        // ✅ 起動時に進行中ならTickerを再開
+        if fusionIsRunning {
+            startTickerIfNeeded()
+        }
+    }
+
+    deinit {
+        tickerTask?.cancel()
     }
 
     // MARK: - Public API
@@ -69,16 +81,19 @@ final class MojaViewModel: ObservableObject {
             mojaCount = 1
             persistMojaCount()
         }
+
+        // ✅ 進行中ならTicker復帰（念のため）
+        if fusionIsRunning {
+            startTickerIfNeeded()
+        }
     }
 
-    /// 1秒ごとに呼ぶ（Timer.onReceive から）
-    /// - fusion中：フレームを進める（見た目用）
-    /// - 0になったら完了処理（stateへキャラ付与）
+    /// （互換用）1秒ごとに呼ぶ想定だったが、安定化のため内部Task運用へ
+    /// 既存コードを壊さないため残す（呼ばれても害はない）
     func tick(now: Date, state: AppState) {
-        if fusionIsRunning {
-            fusionFrameIndex = (fusionFrameIndex + 1) % fusionFrameAssetNames.count
-            syncFusionIfNeeded(now: now, state: state)
-        }
+        // Task運用に寄せたので基本は何もしない
+        // ただし、呼ばれたなら完了判定だけはしておく
+        syncFusionIfNeeded(now: now, state: state)
     }
 
     /// 「もじゃをまとめる」押下
@@ -101,6 +116,9 @@ final class MojaViewModel: ObservableObject {
         persistFusionProgress()
 
         toastCenter("もじゃがまとまり始めた！")
+
+        // ✅ ここでTicker開始
+        startTickerIfNeeded()
     }
 
     /// 「広告視聴で時間を短縮」押下（デモ：指定秒数だけ短縮）
@@ -121,9 +139,7 @@ final class MojaViewModel: ObservableObject {
         syncFusionIfNeeded(now: now, state: state)
     }
 
-    /// ✅ 現在表示するアセット名（View側で使ってもOK）
-    /// - fusion中：fusionFrameIndex に応じて切り替え
-    /// - 待機時：仕様に合わせて "moja"
+    /// ✅ 現在表示するアセット名（View側で使ってOK）
     func currentFusionAssetName() -> String {
         if fusionIsRunning {
             let idx = max(0, min(fusionFrameIndex, fusionFrameAssetNames.count - 1))
@@ -147,7 +163,43 @@ final class MojaViewModel: ObservableObject {
         return String(format: "%02d:%02d:%02d", h, m, s)
     }
 
-    // MARK: - Private
+    // MARK: - Private (Ticker)
+
+    private func startTickerIfNeeded() {
+        guard tickerTask == nil else { return }
+
+        tickerTask = Task { [weak self] in
+            guard let self else { return }
+
+            while !Task.isCancelled {
+                // 進行が止まったら終了
+                if self.fusionIsRunning == false {
+                    break
+                }
+
+                // 1秒待つ（RunLoopに依存しない）
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+                if Task.isCancelled { break }
+                if self.fusionIsRunning == false { break }
+
+                // フレームを進める（見た目用）
+                self.fusionFrameIndex = (self.fusionFrameIndex + 1) % self.fusionFrameAssetNames.count
+            }
+
+            // 後始末
+            await MainActor.run {
+                self.tickerTask = nil
+            }
+        }
+    }
+
+    private func stopTicker() {
+        tickerTask?.cancel()
+        tickerTask = nil
+    }
+
+    // MARK: - Private (Fusion)
 
     private func syncFusionIfNeeded(now: Date, state: AppState) {
         guard fusionIsRunning, let end = fusionEndAt else { return }
@@ -158,6 +210,9 @@ final class MojaViewModel: ObservableObject {
             fusionEndAt = nil
             fusionFrameIndex = 0
             persistFusionProgress()
+
+            // ✅ Ticker停止
+            stopTicker()
 
             grantRandomPet(state: state)
         }
@@ -191,7 +246,6 @@ final class MojaViewModel: ObservableObject {
             showCenterToast = true
         }
 
-        // 自動で消す（View側でも消せるけど、VM側で閉じておくと楽）
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
             guard let self else { return }
             withAnimation(.easeOut(duration: 0.2)) {
@@ -214,11 +268,9 @@ final class MojaViewModel: ObservableObject {
             fusionEndAt = nil
         }
 
-        // 起動直後に「停止中」なら index を初期化
         if fusionIsRunning == false {
             fusionFrameIndex = 0
         } else {
-            // 念のため範囲内に丸める（配列長変更への耐性）
             fusionFrameIndex = fusionFrameIndex % max(1, fusionFrameAssetNames.count)
         }
     }
