@@ -20,7 +20,7 @@ final class MojaViewModel: ObservableObject {
     @Published private(set) var fusionIsRunning: Bool = false
     @Published private(set) var fusionEndAt: Date? = nil
 
-    /// fusion中：0〜3 を 1秒ごとに回す
+    /// fusion中：0〜(count-1) を 1秒ごとに回す
     @Published private(set) var fusionFrameIndex: Int = 0
 
     /// 画面中央トースト用（View側で表示してOK）
@@ -35,12 +35,12 @@ final class MojaViewModel: ObservableObject {
     /// 6時間
     private let fusionDuration: TimeInterval = 6 * 60 * 60
 
-    /// 1秒ごとのアニメ切り替え用
+    /// 1秒ごとの切り替え用（仕様：moja → A → B → C → moja...）
     let fusionFrameAssetNames: [String] = [
+        "moja",
         "moja_fusionA",
         "moja_fusionB",
-        "moja_fusionC",
-        "moja_fusionD"
+        "moja_fusionC"
     ]
 
     // MARK: - Storage Keys
@@ -72,7 +72,7 @@ final class MojaViewModel: ObservableObject {
     }
 
     /// 1秒ごとに呼ぶ（Timer.onReceive から）
-    /// - fusion中：フレームを進める
+    /// - fusion中：フレームを進める（見た目用）
     /// - 0になったら完了処理（stateへキャラ付与）
     func tick(now: Date, state: AppState) {
         if fusionIsRunning {
@@ -85,7 +85,7 @@ final class MojaViewModel: ObservableObject {
     func startFusion(now: Date) {
         guard fusionIsRunning == false else { return }
         guard mojaCount >= fusionCost else {
-            toastCenter("mojaが足りない…")
+            toastCenter("もじゃが足りない…")
             return
         }
 
@@ -100,7 +100,7 @@ final class MojaViewModel: ObservableObject {
 
         persistFusionProgress()
 
-        toastCenter("もじゃが合体を始めた！")
+        toastCenter("もじゃがまとまり始めた！")
     }
 
     /// 「広告視聴で時間を短縮」押下（デモ：指定秒数だけ短縮）
@@ -121,13 +121,15 @@ final class MojaViewModel: ObservableObject {
         syncFusionIfNeeded(now: now, state: state)
     }
 
-    /// 待機時は fusionA を固定表示
+    /// ✅ 現在表示するアセット名（View側で使ってもOK）
+    /// - fusion中：fusionFrameIndex に応じて切り替え
+    /// - 待機時：仕様に合わせて "moja"
     func currentFusionAssetName() -> String {
         if fusionIsRunning {
             let idx = max(0, min(fusionFrameIndex, fusionFrameAssetNames.count - 1))
             return fusionFrameAssetNames[idx]
         } else {
-            return "moja_fusionA"
+            return "moja"
         }
     }
 
@@ -212,9 +214,12 @@ final class MojaViewModel: ObservableObject {
             fusionEndAt = nil
         }
 
-        // 起動直後に「すでに終了済み」だったら、見た目が変にならないよう初期化
+        // 起動直後に「停止中」なら index を初期化
         if fusionIsRunning == false {
             fusionFrameIndex = 0
+        } else {
+            // 念のため範囲内に丸める（配列長変更への耐性）
+            fusionFrameIndex = fusionFrameIndex % max(1, fusionFrameAssetNames.count)
         }
     }
 
