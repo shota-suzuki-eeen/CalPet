@@ -1,3 +1,10 @@
+//
+//  MemoriesViewModel.swift
+//  Cal Pet
+//
+//  Created by shota suzuki on 2026/02/21.
+//
+
 import Foundation
 import Combine
 import UIKit

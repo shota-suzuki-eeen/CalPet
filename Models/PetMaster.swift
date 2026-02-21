@@ -22,34 +22,25 @@ struct PetMasterItem: Identifiable, Codable, Equatable {
 
 // MARK: - Care / Friendship (Spec v6)
 
-/// 仕様の固定値（なかよし度・お世話加算など）
-/// ※ロジック実装は主に AppState / HomeView 側になる想定だが、値の一元管理としてここに定義
 enum FriendshipSpec {
     static let maxPoint: Int = 100
 
-    // なかよしカード
-    static let cardThreshold: Int = 100  // 100到達で1枚
-    // 余剰分繰り越しあり → 実装側で (point >= 100) を while で回して枚数加算する
+    static let cardThreshold: Int = 100
 
-    // ご飯（1日最大3回）
     static let foodNormal: Int = 10
     static let foodFavorite: Int = 20
     static let foodSuperFavorite: Int = 30
 
-    // お風呂
     static let bathGain: Int = 15
     static let bathCooldownHours: Int = 8
     static let bathAdReduceHoursPerWatch: Int = 4
     static let bathAdLimitPerDay: Int = 2
 
-    // トイレ
     static let toiletNormal: Int = 10
     static let toiletWithin1h: Int = 20
     static let toiletBonusWindowSeconds: TimeInterval = 60 * 60
 }
 
-/// ご飯の種類（倍率仕様は将来）
-/// 現時点の仕様では加算値が確定しているので “加算値” を持たせる
 enum FoodKind: String, Codable, CaseIterable {
     case normal
     case favorite
@@ -64,8 +55,6 @@ enum FoodKind: String, Codable, CaseIterable {
     }
 }
 
-/// ご飯の時間帯（固定）
-/// ※「提供可能時間」判定は実装側で Date -> hour を見て判定
 enum FoodTimeSlot: String, Codable, CaseIterable {
     case morning
     case noon
@@ -75,12 +64,62 @@ enum FoodTimeSlot: String, Codable, CaseIterable {
 // MARK: - Master List
 
 enum PetMaster {
+    // ✅ 初期実装予定：12体（pet_000 ... pet_011）
     static let all: [PetMasterItem] = [
-        .init(id: "pet_000", name: "はじめの子", personality: "genki"),
-        .init(id: "pet_001", name: "もふもふ", personality: "ottori"),
-        .init(id: "pet_002", name: "つんつん", personality: "tsundere"),
-        .init(id: "pet_003", name: "きっちり", personality: "majime"),
-        .init(id: "pet_004", name: "うさっぽ", personality: "genki"),
-        .init(id: "pet_005", name: "くまろん", personality: "ottori"),
+        .init(id: "pet_000", name: "パーポー", personality: "genki"),
+        .init(id: "pet_001", name: "今後記載予定", personality: "ottori"),
+        .init(id: "pet_002", name: "今後記載予定", personality: "tsundere"),
+        .init(id: "pet_003", name: "今後記載予定", personality: "majime"),
+        .init(id: "pet_004", name: "今後記載予定", personality: "genki"),
+        .init(id: "pet_005", name: "今後記載予定", personality: "ottori"),
+        .init(id: "pet_006", name: "今後記載予定", personality: "tsundere"),
+        .init(id: "pet_007", name: "今後記載予定", personality: "majime"),
+        .init(id: "pet_008", name: "今後記載予定", personality: "genki"),
+        .init(id: "pet_009", name: "今後記載予定", personality: "ottori"),
+        .init(id: "pet_010", name: "今後記載予定", personality: "tsundere"),
+        .init(id: "pet_011", name: "今後記載予定", personality: "majime"),
     ]
+
+    // ✅ ペットID → アセット名
+    static func assetName(for petID: String) -> String {
+        switch petID {
+        case "pet_000":
+            return "purpor"
+        default:
+            return petID
+        }
+    }
+
+    // ✅ 追加：ペットID → 説明文
+    // まずは固定文でOK（将来は PetMasterItem に description を追加しても良い）
+    static func description(for petID: String) -> String {
+        switch petID {
+        case "pet_000":
+            return "もじゃもじゃ界のムードメーカー。元気いっぱいで、きみの毎日にちょっとした冒険を持ち込んでくれる。"
+        case "pet_001":
+            return "今後記載予定"
+        case "pet_002":
+            return "今後記載予定"
+        case "pet_003":
+            return "今後記載予定"
+        case "pet_004":
+            return "今後記載予定"
+        case "pet_005":
+            return "今後記載予定"
+        case "pet_006":
+            return "今後記載予定"
+        case "pet_007":
+            return "今後記載予定"
+        case "pet_008":
+            return "今後記載予定"
+        case "pet_009":
+            return "今後記載予定"
+        case "pet_010":
+            return "今後記載予定"
+        case "pet_011":
+            return "今後記載予定"
+        default:
+            return "今後記載予定"
+        }
+    }
 }

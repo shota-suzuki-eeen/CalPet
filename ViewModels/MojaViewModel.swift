@@ -214,6 +214,7 @@ final class MojaViewModel: ObservableObject {
             // ✅ Ticker停止
             stopTicker()
 
+            // ✅ ここでキャラ獲得（「0になった時」= 完了時）
             grantRandomPet(state: state)
         }
     }
@@ -221,8 +222,9 @@ final class MojaViewModel: ObservableObject {
     private func grantRandomPet(state: AppState) {
         state.ensureInitialPetsIfNeeded()
 
+        // ✅ 図鑑仕様に合わせる：候補は「12体（pet_000...pet_011）」のみ
         let owned = Set(state.ownedPetIDs())
-        let candidates = PetMaster.all.map(\.id).filter { !owned.contains($0) }
+        let candidates = AppState.initialZukanPetIDs.filter { !owned.contains($0) }
 
         guard let newId = candidates.randomElement() else {
             toastCenter("全部のキャラを持っている！")
@@ -233,6 +235,7 @@ final class MojaViewModel: ObservableObject {
         ids.append(newId)
         state.setOwnedPetIDs(ids)
 
+        // 表示名はマスタから（未定義ならID）
         if let item = PetMaster.all.first(where: { $0.id == newId }) {
             toastCenter("新キャラ「\(item.name)」をゲット！")
         } else {

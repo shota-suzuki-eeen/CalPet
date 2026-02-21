@@ -520,6 +520,10 @@ extension AppState {
 
 // MARK: - Pets (owned list helpers)
 extension AppState {
+    /// ✅ 図鑑の初期実装予定：12体（pet_000 ... pet_011）
+    /// View / ViewModel で同じ配列を持つとズレの原因になるため AppState 側に集約
+    static let initialZukanPetIDs: [String] = (0..<12).map { String(format: "pet_%03d", $0) }
+
     func ownedPetIDs() -> [String] {
         guard let data = ownedPetIDsData,
               let arr = try? JSONDecoder().decode([String].self, from: data) else {
@@ -539,6 +543,28 @@ extension AppState {
             setOwnedPetIDs(ids)
             currentPetID = "pet_000"
         }
+    }
+
+    /// ✅ 追加：未所持の中から1体を完全ランダムで獲得する
+    /// - すでに全て所持している場合は nil
+    /// - 獲得したIDは ownedPetIDs に追加（重複しない）
+    /// - currentPetID は変更しない（既存仕様を壊さない）
+    @discardableResult
+    func acquireRandomPetIfPossible() -> String? {
+        var owned = ownedPetIDs()
+        let ownedSet = Set(owned)
+
+        let candidates = AppState.initialZukanPetIDs.filter { !ownedSet.contains($0) }
+        guard let picked = candidates.randomElement() else { return nil }
+
+        owned.append(picked)
+        setOwnedPetIDs(owned)
+        return picked
+    }
+
+    /// ✅ 追加：図鑑IDとして有効か（保険）
+    func isValidZukanPetID(_ id: String) -> Bool {
+        AppState.initialZukanPetIDs.contains(id)
     }
 }
 

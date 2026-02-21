@@ -1,3 +1,10 @@
+//
+//  RootViewModel.swift
+//  Cal Pet
+//
+//  Created by shota suzuki on 2026/02/05.
+//
+
 import Foundation
 import Combine
 import SwiftData
