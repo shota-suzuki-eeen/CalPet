@@ -61,10 +61,10 @@ struct HomeView: View {
     // ✅ Home表示中か（ショップ滞在中に onChange が走っても演出しない）
     @State private var isHomeVisible: Bool = false
 
-    // ✅ MAX到達時チケット演出
-    @State private var showTicketOverlay: Bool = false
-    @State private var ticketScale: CGFloat = 0.8
-    @State private var ticketOpacity: Double = 0.0
+    // ✅ MAX到達時 “もじゃ” 演出（旧: チケット）
+    @State private var showMojaOverlay: Bool = false
+    @State private var rewardScale: CGFloat = 0.8
+    @State private var rewardOpacity: Double = 0.0
     @State private var getOpacity: Double = 0.0
     @State private var getRotation: Double = 0.0
 
@@ -137,7 +137,8 @@ struct HomeView: View {
         static let foodShelfBottomGapFromButtons: CGFloat = 120
         static let foodItemSize: CGFloat = 64
 
-        static let ticketMaxWidth: CGFloat = 220
+        // ✅ 報酬演出（旧: ticket）
+        static let rewardMaxWidth: CGFloat = 220
         static let getMaxWidth: CGFloat = 240
         static let getTextMaxWidth: CGFloat = 200
 
@@ -156,7 +157,7 @@ struct HomeView: View {
         static let zCharacter: Double = 50
         static let zFoodOutsideTap: Double = 210
         static let zFoodShelf: Double = 220
-        static let zTicket: Double = 300
+        static let zReward: Double = 300
     }
 
     var body: some View {
@@ -177,7 +178,6 @@ struct HomeView: View {
 
                         ZStack {
                             // ✅ ご飯テロップ表示中：テロップ外タップで閉じる（全面透明レイヤー）
-                            //  - FoodShelfPanel を zIndex で上に置くことで、テロップ内タップは閉じない
                             if showFoodShelf {
                                 Color.black.opacity(0.001)
                                     .ignoresSafeArea()
@@ -338,12 +338,12 @@ struct HomeView: View {
                             .padding(.bottom, Layout.bottomPadding)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
 
-                            // 6) チケット演出
-                            if showTicketOverlay {
+                            // 6) “もじゃ” 演出（旧: チケット）
+                            if showMojaOverlay {
                                 ZStack {
                                     Color.black.opacity(0.001)
                                         .ignoresSafeArea()
-                                        .onTapGesture { dismissTicketOverlay() }
+                                        .onTapGesture { dismissMojaOverlay() }
 
                                     ZStack {
                                         ZStack {
@@ -362,25 +362,26 @@ struct HomeView: View {
                                                 .rotationEffect(.degrees(getRotation * 0.85))
                                         }
 
-                                        Image("ticket")
+                                        // ✅ 報酬本体：もじゃ（asset: moja）
+                                        Image("moja")
                                             .resizable()
                                             .scaledToFit()
-                                            .frame(maxWidth: min(geo.size.width * 0.7, Layout.ticketMaxWidth))
-                                            .opacity(ticketOpacity)
-                                            .scaleEffect(ticketScale)
+                                            .frame(maxWidth: min(geo.size.width * 0.7, Layout.rewardMaxWidth))
+                                            .opacity(rewardOpacity)
+                                            .scaleEffect(rewardScale)
 
                                         Image("get_text")
                                             .resizable()
                                             .scaledToFit()
                                             .frame(maxWidth: min(geo.size.width * 0.62, Layout.getTextMaxWidth))
                                             .offset(x: Layout.getTextOffsetX, y: Layout.getTextOffsetY)
-                                            .opacity(ticketOpacity)
-                                            .scaleEffect(ticketScale)
+                                            .opacity(rewardOpacity)
+                                            .scaleEffect(rewardScale)
                                     }
                                 }
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                                 .transition(.opacity)
-                                .zIndex(Layout.zTicket)
+                                .zIndex(Layout.zReward)
                             }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -634,7 +635,6 @@ struct HomeView: View {
 
     // MARK: - Drag & Drop（ごはん）
     private func handleFoodDrop(foodId: String, state: AppState) -> Bool {
-        // ✅ ご飯を「あげた（試みた）」時点で必ず閉じる（成功/失敗問わず）
         defer { closeFoodShelf() }
 
         guard let food = FoodCatalog.byId(foodId) else {
@@ -752,7 +752,8 @@ struct HomeView: View {
                 displayedFriendship = Double(maxMeter)
             }
 
-            triggerTicketOverlay()
+            // ✅ MAX到達報酬：もじゃ演出
+            triggerMojaOverlay()
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.37) {
                 displayedFriendship = 0
@@ -768,22 +769,22 @@ struct HomeView: View {
         }
     }
 
-    private func triggerTicketOverlay() {
-        showTicketOverlay = false
-        ticketScale = 0.8
-        ticketOpacity = 0.0
+    private func triggerMojaOverlay() {
+        showMojaOverlay = false
+        rewardScale = 0.8
+        rewardOpacity = 0.0
         getOpacity = 0.0
         getRotation = 0.0
 
         withAnimation(.easeOut(duration: 0.12)) {
-            showTicketOverlay = true
+            showMojaOverlay = true
         }
 
         withAnimation(.spring(response: 0.35, dampingFraction: 0.62)) {
-            ticketScale = 1.0
+            rewardScale = 1.0
         }
         withAnimation(.easeOut(duration: 0.18)) {
-            ticketOpacity = 1.0
+            rewardOpacity = 1.0
             getOpacity = 1.0
         }
 
@@ -792,16 +793,16 @@ struct HomeView: View {
         }
     }
 
-    private func dismissTicketOverlay() {
+    private func dismissMojaOverlay() {
         withAnimation(.easeInOut(duration: 0.18)) {
-            ticketOpacity = 0.0
+            rewardOpacity = 0.0
             getOpacity = 0.0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             withAnimation(.easeOut(duration: 0.12)) {
-                showTicketOverlay = false
+                showMojaOverlay = false
             }
-            ticketScale = 0.8
+            rewardScale = 0.8
             getRotation = 0.0
         }
     }
@@ -894,7 +895,6 @@ struct HomeView: View {
             Haptics.rattle(duration: 0.12, style: .light)
         }
 
-        // ✅ 仕様：表示中に “ごはん” ボタンを押したら閉じる／非表示なら開く
         if showFoodShelf {
             closeFoodShelf()
             return
@@ -989,7 +989,8 @@ struct HomeView: View {
             state.ensureDailyResetIfNeeded(now: now)
 
             state.lastSyncedAt = Calendar.current.startOfDay(for: now)
-            state.eggAdUsedToday = false
+
+            // ✅ 卵は廃止のため、eggAdUsedToday などは触らない
 
             save()
             loadTodayPhoto()
@@ -1317,6 +1318,14 @@ private struct RightSideButtons: View {
 
             NavigationLink { MemoriesView() } label: {
                 Image("omoide_button")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: buttonSize, height: buttonSize)
+            }
+
+            // ✅ 追加：思い出ボタンと図鑑ボタンの間に “もじゃ” ボタン
+            NavigationLink { MojaView(state: state) } label: {
+                Image("moja")
                     .resizable()
                     .scaledToFit()
                     .frame(width: buttonSize, height: buttonSize)

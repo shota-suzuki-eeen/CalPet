@@ -31,16 +31,8 @@ struct ShopView: View {
                         pendingKcal: state.pendingKcal
                     )
 
-                    // 卵
-                    EggCard(
-                        eggOwned: state.eggOwned,
-                        hatchAt: state.eggHatchAt,
-                        cardCount: state.friendshipCardCount,
-                        eggAdUsedToday: state.eggAdUsedToday,
-                        onBuyEgg: { viewModel.buyEgg(state: state); save() },
-                        onInstantHatchAd: { viewModel.instantHatchByAd(state: state); save() },
-                        onHatch: { viewModel.hatchEgg(state: state); save() }
-                    )
+                    // ✅ 卵は廃止（UIも状態もショップから撤去）
+                    // EggCard(...) ← 削除
 
                     // ✅ デイリーショップ（FoodCatalog から6品抽選）
                     DailyShopCard(
@@ -68,11 +60,7 @@ struct ShopView: View {
             viewModel.onAppear(state: state)
             save()
         }
-        .alert("孵化", isPresented: $viewModel.showHatchAlert) {
-            Button("OK") { }
-        } message: {
-            Text(viewModel.hatchMessage)
-        }
+        // ✅ 卵孵化の alert は廃止（showHatchAlert / hatchMessage 参照もしない）
         .overlay(alignment: .bottom) {
             if viewModel.showToast, let toastMessage = viewModel.toastMessage {
                 ToastView(message: toastMessage)
@@ -191,90 +179,6 @@ private struct DailyShopCard: View {
             Text("※ リセットで「再抽選＋全在庫1に戻す」")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-        }
-        .padding()
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
-}
-
-// MARK: - Egg UI
-
-private struct EggCard: View {
-    let eggOwned: Bool
-    let hatchAt: Date?
-    let cardCount: Int
-    let eggAdUsedToday: Bool
-
-    let onBuyEgg: () -> Void
-    let onInstantHatchAd: () -> Void
-    let onHatch: () -> Void
-
-    private var canBuy: Bool {
-        cardCount >= 1 && !eggOwned
-    }
-
-    private var isHatchReady: Bool {
-        guard eggOwned, let hatchAt else { return false }
-        return Date() >= hatchAt
-    }
-
-    private var remainingText: String {
-        guard eggOwned, let hatchAt else { return "-" }
-        let sec = max(0, Int(hatchAt.timeIntervalSinceNow))
-        let h = sec / 3600
-        let m = (sec % 3600) / 60
-        return String(format: "%02d:%02d", h, m)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("卵").font(.headline)
-                Spacer()
-                Text("なかよしカード \(cardCount)枚")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !eggOwned {
-                Text("カード1枚で卵を購入できます（同時に1個まで）")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                Button("卵を購入（カード1枚）") { onBuyEgg() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canBuy)
-
-            } else {
-                HStack {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(isHatchReady ? "孵化できます！" : "孵化まで残り \(remainingText)")
-                            .font(.title3).bold()
-
-                        Text("孵化：購入から6時間後")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                }
-
-                HStack(spacing: 10) {
-                    Button("孵化する") { onHatch() }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!isHatchReady)
-
-                    Button("今すぐ孵化（広告）") { onInstantHatchAd() }
-                        .buttonStyle(.bordered)
-                        .disabled(eggAdUsedToday || isHatchReady)
-                }
-
-                if eggAdUsedToday {
-                    Text("※ 本日の即孵化（広告）は使用済み")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
         }
         .padding()
         .background(.thinMaterial)

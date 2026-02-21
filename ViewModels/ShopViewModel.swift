@@ -21,7 +21,8 @@ final class ShopViewModel: ObservableObject {
         state.ensureInitialPetsIfNeeded()
         handleDayRolloverIfNeeded(state: state)
         ensureDailyShopIfNeeded(state: state)
-        applyPendingToWalletIfNeeded(state: state)
+
+        _ = state.drainPendingKcalToWallet()   // ✅ 一元化
         displayedWalletKcal = state.walletKcal
     }
 
@@ -33,7 +34,7 @@ final class ShopViewModel: ObservableObject {
     func buyFood(itemID: String, state: AppState) {
         handleDayRolloverIfNeeded(state: state)
         ensureDailyShopIfNeeded(state: state)
-        applyPendingToWalletIfNeeded(state: state)
+        _ = state.drainPendingKcalToWallet()   // ✅ 一元化
 
         guard var items = decodeShopItems(from: state) else { return }
         guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
@@ -167,14 +168,6 @@ final class ShopViewModel: ObservableObject {
         let name = PetMaster.all.first(where: { $0.id == newID })?.name ?? "新キャラ"
         hatchMessage = "\(name) が仲間になりました！"
         showHatchAlert = true
-    }
-
-    private func applyPendingToWalletIfNeeded(state: AppState) {
-        guard state.pendingKcal > 0 else { return }
-        let add = max(0, state.pendingKcal)
-        guard add > 0 else { return }
-        state.walletKcal += add
-        state.pendingKcal = 0
     }
 
     private func encodeShopItems(_ items: [ShopFoodItem]) -> Data? {
