@@ -155,7 +155,6 @@ struct HomeView: View {
 
         // ✅ zIndex（前後関係固定）
         static let zCharacter: Double = 50
-        static let zFoodOutsideTap: Double = 210
         static let zFoodShelf: Double = 220
         static let zReward: Double = 300
     }
@@ -177,13 +176,12 @@ struct HomeView: View {
                         let characterWidth = min(geo.size.width * 0.62, Layout.characterMaxWidth)
 
                         ZStack {
-                            // ✅ ご飯テロップ表示中：テロップ外タップで閉じる（全面透明レイヤー）
+
+                            // ✅ 追加：棚が開いている時、空きスペースをタップしたら閉じる（前面に置かないのでドロップを邪魔しない）
                             if showFoodShelf {
-                                Color.black.opacity(0.001)
-                                    .ignoresSafeArea()
+                                Color.clear
                                     .contentShape(Rectangle())
                                     .onTapGesture { closeFoodShelf() }
-                                    .zIndex(Layout.zFoodOutsideTap)
                             }
 
                             // 1) キャラクター
@@ -195,6 +193,12 @@ struct HomeView: View {
                                     .zIndex(Layout.zCharacter)
                                     .highPriorityGesture(
                                         TapGesture().onEnded { triggerCharacterJump() }
+                                    )
+                                    // ✅ 追加：棚が開いている時は、キャラ周辺をタップしても閉じる（ドロップは妨げない）
+                                    .simultaneousGesture(
+                                        TapGesture().onEnded {
+                                            if showFoodShelf { closeFoodShelf() }
+                                        }
                                     )
                                     .onDrop(
                                         of: [UTType.plainText.identifier, UTType.text.identifier],
@@ -267,6 +271,12 @@ struct HomeView: View {
                             .padding(.top, Layout.leftTopPaddingTop)
                             .padding(.leading, Layout.leftTopPaddingLeading)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            // ✅ 追加：メーター周りをタップしたら閉じる
+                            .simultaneousGesture(
+                                TapGesture().onEnded {
+                                    if showFoodShelf { closeFoodShelf() }
+                                }
+                            )
 
                             // 3) 右上：リング
                             KcalRing(
@@ -279,6 +289,12 @@ struct HomeView: View {
                             .padding(.top, Layout.kcalRingTop)
                             .padding(.trailing, Layout.kcalRingTrailing)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            // ✅ 追加：リング周りをタップしたら閉じる
+                            .simultaneousGesture(
+                                TapGesture().onEnded {
+                                    if showFoodShelf { closeFoodShelf() }
+                                }
+                            )
 
                             // 4) 右側：縦ボタン
                             RightSideButtons(
@@ -290,6 +306,12 @@ struct HomeView: View {
                             .padding(.top, Layout.rightButtonsTopOffset)
                             .padding(.trailing, Layout.rightButtonsTrailing)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                            // ✅ 追加：ボタン領域をタップしても棚を閉じたい（押下の邪魔はしない）
+                            .simultaneousGesture(
+                                TapGesture().onEnded {
+                                    if showFoodShelf { closeFoodShelf() }
+                                }
+                            )
 
                             // 4.5) ごはん棚
                             if showFoodShelf {
@@ -305,7 +327,7 @@ struct HomeView: View {
                             TimelineView(.periodic(from: Date(), by: 60.0)) { timeline in
                                 let now = timeline.date
 
-                                let canFood = (displayedSatisfaction < Layout.satisfactionSegments)
+                                let canFood = true // ✅ 満足度MAXでも棚は開ける
                                 let canBath = isBathAvailablePure(now: now)
                                 let canWc = (state.toiletFlagAt != nil)
                                 let canSleep = true
@@ -337,6 +359,12 @@ struct HomeView: View {
                             }
                             .padding(.bottom, Layout.bottomPadding)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                            // ✅ 追加：下部ボタン周りタップでも棚を閉じる
+                            .simultaneousGesture(
+                                TapGesture().onEnded {
+                                    if showFoodShelf { closeFoodShelf() }
+                                }
+                            )
 
                             // 6) “もじゃ” 演出（旧: チケット）
                             if showMojaOverlay {
