@@ -74,6 +74,9 @@ struct HomeView: View {
     // ✅ ドロップターゲット演出
     @State private var isDropTargeted: Bool = false
 
+    // ✅ 追加：ドラッグでキャラ上ホバー中か（表情差し替えのため）
+    @State private var isFoodHoveringOverCharacter: Bool = false
+
     // =========================================================
     // ✅ キャラクターアニメ（アイドルまばたき / タップジャンプ）
     // =========================================================
@@ -83,6 +86,21 @@ struct HomeView: View {
 
     private let doubleBlinkChance: Double = 0.18
     private let doubleBlinkGapRange: ClosedRange<Double> = 0.18...0.45
+
+    // ✅ 追加：現在育成中キャラの「ベースアセット名」
+    private var currentBaseAssetName: String {
+        PetMaster.assetName(for: state.currentPetID)
+    }
+
+    // ✅ 追加：purpor 以外はアニメ素材が無い想定なので保護
+    private var canPlayCharacterAnimation: Bool {
+        currentBaseAssetName == "purpor"
+    }
+
+    // ✅ 追加：満足度MAX判定（表示値ベースでOK）
+    private var isSatisfactionMax: Bool {
+        displayedSatisfaction >= Layout.satisfactionSegments
+    }
 
     // MARK: - Layout
     fileprivate enum Layout {
@@ -221,6 +239,9 @@ struct HomeView: View {
                                             guard let foodId = id else { return }
                                             DispatchQueue.main.async {
                                                 _ = handleFoodDrop(foodId: foodId, state: state)
+
+                                                // ✅ 念のため：ドロップ処理後は表情をベースに戻す
+                                                endFoodHoverIfNeeded()
                                             }
                                         }
                                         return true
@@ -450,6 +471,9 @@ struct HomeView: View {
         .task {
             state.ensureInitialPetsIfNeeded()
 
+            // ✅ 追加：Home表示キャラを currentPetID に合わせる
+            syncCharacterBaseFromState(force: true)
+
             if state.dailyGoalKcal > 0, didSetDailyGoalOnce == false {
                 didSetDailyGoalOnce = true
             }
@@ -476,6 +500,9 @@ struct HomeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             state.ensureInitialPetsIfNeeded()
+
+            // ✅ 追加：復帰時にも currentPetID を反映
+            syncCharacterBaseFromState(force: true)
 
             todaySteps = state.cachedTodaySteps
             todayKcal = state.cachedTodayKcal
@@ -520,6 +547,10 @@ struct HomeView: View {
         }
         .onAppear {
             isHomeVisible = true
+
+            // ✅ 追加：表示開始時にも currentPetID を反映
+            syncCharacterBaseFromState(force: true)
+
             startCharacterIdleLoopIfNeeded()
 
             withAnimation(.easeOut(duration: 0.25)) {
@@ -536,7 +567,9 @@ struct HomeView: View {
 
             stopCharacterIdleLoop()
             isCharacterActionRunning = false
-            characterAssetName = "purpor"
+
+            // ✅ 修正：purpor 固定に戻さず、ベースに戻す
+            characterAssetName = currentBaseAssetName
         }
         .onChange(of: state.walletKcal) { _, _ in
             guard isHomeVisible else { return }
@@ -550,6 +583,66 @@ struct HomeView: View {
                 displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
             }
         }
+        // ✅ 追加：図鑑で「育成する」→ Homeに即反映
+        .onChange(of: state.currentPetID) { _, _ in
+            syncCharacterBaseFromState(force: true)
+        }
+        // ✅ 追加：ドラッグでキャラ上ホバー中（isDropTargeted）に表情を差し替え
+        .onChange(of: isDropTargeted) { _, newValue in
+            if newValue {
+                beginFoodHover()
+            } else {
+                endFoodHoverIfNeeded()
+            }
+        }
+        // ✅ 追加：ホバー中に満足度が変わったら即反映（MAX/非MAXの差し替え）
+        .onChange(of: displayedSatisfaction) { _, _ in
+            guard isFoodHoveringOverCharacter else { return }
+            beginFoodHover()
+        }
+    }
+
+    // MARK: - ✅ currentPetID → 表示キャラ反映
+    private func syncCharacterBaseFromState(force: Bool) {
+        // アクション中は差し替えるとチラつくので、強制時以外は避ける
+        if !force {
+            guard !isCharacterActionRunning else { return }
+        }
+
+        // ホバー中は “ホバー用アセット” が優先
+        if isFoodHoveringOverCharacter {
+            beginFoodHover()
+            return
+        }
+
+        // 既存のアニメ系がpurpor前提なので、purpor以外は静止画運用
+        characterAssetName = currentBaseAssetName
+    }
+
+    // MARK: - ✅ Food Hover（purpor_hungry / purpor_burp）
+    private func beginFoodHover() {
+        isFoodHoveringOverCharacter = true
+
+        // purpor 以外は hover差し替え素材が無い想定なので、ベースのまま
+        guard canPlayCharacterAnimation else {
+            characterAssetName = currentBaseAssetName
+            return
+        }
+
+        // アクション中は割り込みたくない（ただしホバー優先にしたい場合はここを外せる）
+        guard !isCharacterActionRunning else { return }
+
+        characterAssetName = isSatisfactionMax ? "purpor_burp" : "purpor_hungry"
+    }
+
+    private func endFoodHoverIfNeeded() {
+        guard isFoodHoveringOverCharacter else { return }
+        isFoodHoveringOverCharacter = false
+
+        // アクション中は自然復帰に任せる（完了時に base に戻る）
+        guard !isCharacterActionRunning else { return }
+
+        characterAssetName = currentBaseAssetName
     }
 
     // MARK: - FoodShelf
@@ -579,6 +672,12 @@ struct HomeView: View {
                     continue
                 }
 
+                // ✅ 追加：ホバー中は差し替えを維持したいので、アイドル割り込みを止める
+                if isFoodHoveringOverCharacter {
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    continue
+                }
+
                 if isCharacterActionRunning {
                     try? await Task.sleep(nanoseconds: 120_000_000)
                     continue
@@ -589,7 +688,16 @@ struct HomeView: View {
 
                 if Task.isCancelled { break }
                 if !isHomeVisible { continue }
+                if isFoodHoveringOverCharacter { continue }
                 if isCharacterActionRunning { continue }
+
+                // ✅ 追加：purpor以外はまばたき素材が無い想定なのでスキップ
+                if !canPlayCharacterAnimation {
+                    await MainActor.run {
+                        characterAssetName = currentBaseAssetName
+                    }
+                    continue
+                }
 
                 let doDouble = Double.random(in: 0...1) < doubleBlinkChance
 
@@ -601,6 +709,7 @@ struct HomeView: View {
 
                     if Task.isCancelled { break }
                     if !isHomeVisible { continue }
+                    if isFoodHoveringOverCharacter { continue }
                     if isCharacterActionRunning { continue }
 
                     await playBlink()
@@ -617,6 +726,13 @@ struct HomeView: View {
     private func triggerCharacterJump() {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
+
+        // ✅ 追加：ホバー中はジャンプさせない（表情維持）
+        guard !isFoodHoveringOverCharacter else { return }
+
+        // ✅ 追加：purpor以外はジャンプ素材が無い想定なので何もしない
+        guard canPlayCharacterAnimation else { return }
+
         Task { await playJump() }
     }
 
@@ -624,24 +740,45 @@ struct HomeView: View {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
 
+        // ✅ 追加：ホバー中は差し替え優先
+        guard !isFoodHoveringOverCharacter else { return }
+
+        // ✅ 追加：purpor前提
+        guard canPlayCharacterAnimation else {
+            await MainActor.run { characterAssetName = currentBaseAssetName }
+            return
+        }
+
         await MainActor.run { characterAssetName = "purpor_idle_blink_0001" }
         try? await Task.sleep(nanoseconds: 70_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
+        if isFoodHoveringOverCharacter { return }
 
         await MainActor.run { characterAssetName = "purpor_idle_blink_0002" }
         try? await Task.sleep(nanoseconds: 60_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
+        if isFoodHoveringOverCharacter { return }
 
         await MainActor.run { characterAssetName = "purpor_idle_blink_0003" }
         try? await Task.sleep(nanoseconds: 70_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
+        if isFoodHoveringOverCharacter { return }
 
-        await MainActor.run { characterAssetName = "purpor" }
+        await MainActor.run { characterAssetName = currentBaseAssetName }
     }
 
     private func playJump() async {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
+
+        // ✅ 追加：ホバー中は差し替え優先
+        guard !isFoodHoveringOverCharacter else { return }
+
+        // ✅ 追加：purpor前提
+        guard canPlayCharacterAnimation else {
+            await MainActor.run { characterAssetName = currentBaseAssetName }
+            return
+        }
 
         await MainActor.run {
             isCharacterActionRunning = true
@@ -656,14 +793,22 @@ struct HomeView: View {
         try? await Task.sleep(nanoseconds: 90_000_000)
 
         await MainActor.run {
-            characterAssetName = "purpor"
+            characterAssetName = currentBaseAssetName
             isCharacterActionRunning = false
+        }
+
+        // ✅ 追加：ジャンプ完了直後にホバー中なら、ホバー用表情へ戻す
+        if isFoodHoveringOverCharacter {
+            await MainActor.run { beginFoodHover() }
         }
     }
 
     // MARK: - Drag & Drop（ごはん）
     private func handleFoodDrop(foodId: String, state: AppState) -> Bool {
-        defer { closeFoodShelf() }
+        defer {
+            closeFoodShelf()
+            endFoodHoverIfNeeded()
+        }
 
         guard let food = FoodCatalog.byId(foodId) else {
             toast("ご飯が見つかりません")

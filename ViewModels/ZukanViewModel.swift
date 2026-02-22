@@ -43,7 +43,7 @@ final class ZukanViewModel: ObservableObject {
 
     /// ✅ 追加：図鑑グリッド用（12体ぶんを常に返す）
     /// - 未獲得：CalPet_secret を表示
-    /// - 獲得済み：該当キャラのアセット（idと同名想定）を表示
+    /// - 獲得済み：PetMaster.assetName(for:) を表示（petIDと画像名がズレてもOK）
     func makeZukanSlots(state: AppState) -> [ZukanPetSlot] {
         let owned = Set(state.ownedPetIDs())
         let current = state.currentPetID
@@ -53,7 +53,7 @@ final class ZukanViewModel: ObservableObject {
             let name = isOwned
                 ? (PetMaster.all.first(where: { $0.id == id })?.name ?? id)
                 : "？？？"
-            let imageName = isOwned ? id : "CalPet_secret"
+            let imageName = isOwned ? PetMaster.assetName(for: id) : "CalPet_secret"
 
             return ZukanPetSlot(
                 id: id,

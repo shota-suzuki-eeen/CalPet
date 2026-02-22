@@ -81,7 +81,12 @@ struct ZukanView: View {
     }
 
     private func save() {
-        do { try modelContext.save() } catch { }
+        do {
+            try modelContext.save()
+        } catch {
+            // ✅ 握りつぶすと原因追跡が難しいので最低限ログ
+            print("❌ ZukanView save error:", error)
+        }
     }
 }
 

@@ -64,60 +64,45 @@ enum FoodTimeSlot: String, Codable, CaseIterable {
 // MARK: - Master List
 
 enum PetMaster {
-    // ✅ 初期実装予定：12体（pet_000 ... pet_011）
+
     static let all: [PetMasterItem] = [
         .init(id: "pet_000", name: "パーポー", personality: "genki"),
-        .init(id: "pet_001", name: "今後記載予定", personality: "ottori"),
-        .init(id: "pet_002", name: "今後記載予定", personality: "tsundere"),
-        .init(id: "pet_003", name: "今後記載予定", personality: "majime"),
-        .init(id: "pet_004", name: "今後記載予定", personality: "genki"),
-        .init(id: "pet_005", name: "今後記載予定", personality: "ottori"),
-        .init(id: "pet_006", name: "今後記載予定", personality: "tsundere"),
-        .init(id: "pet_007", name: "今後記載予定", personality: "majime"),
-        .init(id: "pet_008", name: "今後記載予定", personality: "genki"),
-        .init(id: "pet_009", name: "今後記載予定", personality: "ottori"),
-        .init(id: "pet_010", name: "今後記載予定", personality: "tsundere"),
+        .init(id: "pet_001", name: "ビート", personality: "ottori"),
+        .init(id: "pet_002", name: "ビニキ", personality: "tsundere"),
+        .init(id: "pet_003", name: "ヒメイ", personality: "majime"),
+        .init(id: "pet_004", name: "カッケ", personality: "tsundere"),
+        .init(id: "pet_005", name: "ケピョン", personality: "tsundere"),
+        .init(id: "pet_006", name: "ニンジン", personality: "genki"),
+        .init(id: "pet_007", name: "オバオル", personality: "ottori"),
+        .init(id: "pet_008", name: "スン", personality: "ottori"),
+        .init(id: "pet_009", name: "ワニゲータ", personality: "majime"),
+        .init(id: "pet_010", name: "ワレワレ", personality: "genki"),
         .init(id: "pet_011", name: "今後記載予定", personality: "majime"),
     ]
 
-    // ✅ ペットID → アセット名
+    // ✅ ペットID → アセット名（修正版）
     static func assetName(for petID: String) -> String {
         switch petID {
-        case "pet_000":
-            return "purpor"
+        case "pet_000": return "purpor"
+        case "pet_001": return "beat"
+        case "pet_002": return "biniki"
+        case "pet_003": return "himei"
+        case "pet_004": return "kakke"
+        case "pet_005": return "kepyon"
+        case "pet_006": return "ninjin"
+        case "pet_007": return "obaoru"
+        case "pet_008": return "sun"
+        case "pet_009": return "wanigeeta"
+        case "pet_010": return "wareware"
         default:
-            return petID
+            return "purpor" // 安全フォールバック
         }
     }
 
-    // ✅ 追加：ペットID → 説明文
-    // まずは固定文でOK（将来は PetMasterItem に description を追加しても良い）
     static func description(for petID: String) -> String {
         switch petID {
         case "pet_000":
             return "もじゃもじゃ界のムードメーカー。元気いっぱいで、きみの毎日にちょっとした冒険を持ち込んでくれる。"
-        case "pet_001":
-            return "今後記載予定"
-        case "pet_002":
-            return "今後記載予定"
-        case "pet_003":
-            return "今後記載予定"
-        case "pet_004":
-            return "今後記載予定"
-        case "pet_005":
-            return "今後記載予定"
-        case "pet_006":
-            return "今後記載予定"
-        case "pet_007":
-            return "今後記載予定"
-        case "pet_008":
-            return "今後記載予定"
-        case "pet_009":
-            return "今後記載予定"
-        case "pet_010":
-            return "今後記載予定"
-        case "pet_011":
-            return "今後記載予定"
         default:
             return "今後記載予定"
         }
