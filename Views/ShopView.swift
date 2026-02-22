@@ -11,36 +11,30 @@ import UIKit
 
 struct ShopView: View {
     @Environment(\.modelContext) private var modelContext
-
-    // ✅ Rootから渡された“同一のAppState”を使う
     let state: AppState
-
     @StateObject private var viewModel = ShopViewModel()
+
+    // ✅ 購入ポップアップ制御
+    @State private var popup: PurchasePopupState = .none
+
+    // ✅ 不足表示の自動消し
+    @State private var dismissInsufficientTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
-            // ✅ Homeと同系色（不要なら Color.clear でOK）
-            Color(red: 0.35, green: 0.86, blue: 0.88).ignoresSafeArea()
+            // ✅ 背景画像を見せたいので、ベタ塗りをやめる（レイアウトは変わらない）
+            Color.clear.ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 16) {
+                    // ✅ 仕様変更：画面上部の所持カロリー表示は不要（削除）
 
-                    // 所持kcal
-                    WalletSummaryCard(
-                        walletKcal: viewModel.displayedWalletKcal,     // ✅ 表示用（カウントダウン）
-                        pendingKcal: state.pendingKcal
-                    )
-
-                    // ✅ 卵は廃止（UIも状態もショップから撤去）
-                    // EggCard(...) ← 削除
-
-                    // ✅ デイリーショップ（FoodCatalog から6品抽選）
                     DailyShopCard(
                         items: viewModel.decodeShopItems(from: state) ?? [],
                         rewardResetsToday: state.shopRewardResetsToday,
                         maxRewardResetsPerDay: 2,
-                        onBuy: { item in
-                            viewModel.buyFood(itemID: item.id, state: state); save()
+                        onBuyTap: { item in
+                            onTapBuy(item)
                         },
                         onRewardReset: {
                             viewModel.rewardResetShopByAd(state: state, maxPerDay: 2); save()
@@ -48,8 +42,40 @@ struct ShopView: View {
                     )
                 }
                 .padding()
+                .padding(.top, 6) // ✅ 固定ヘッダーとの見た目調整（必要なら微調整）
+            }
+            // ✅ 仕様変更：画面上部に固定（スクロールしても見える）
+            .safeAreaInset(edge: .top) {
+                ShopWalletHeader(walletKcal: viewModel.displayedWalletKcal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 10)
+                    .background(.ultraThinMaterial)
+            }
+
+            // ✅ 仕様変更：購入ポップアップ（中央表示）
+            if popup.isPresented {
+                PurchasePopupOverlay(
+                    popup: $popup,
+                    onConfirmBuy: { item in
+                        viewModel.buyFood(itemID: item.id, state: state); save()
+                        popup = .none
+                    }
+                )
+                .transition(.opacity)
+                .zIndex(10)
             }
         }
+        .background(
+            ZStack {
+                Image("Shop_background")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+            }
+        )
         .navigationTitle("ショップ")
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -60,7 +86,6 @@ struct ShopView: View {
             viewModel.onAppear(state: state)
             save()
         }
-        // ✅ 卵孵化の alert は廃止（showHatchAlert / hatchMessage 参照もしない）
         .overlay(alignment: .bottom) {
             if viewModel.showToast, let toastMessage = viewModel.toastMessage {
                 ToastView(message: toastMessage)
@@ -68,6 +93,38 @@ struct ShopView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
+        .onDisappear {
+            dismissInsufficientTask?.cancel()
+            dismissInsufficientTask = nil
+        }
+    }
+
+    private func onTapBuy(_ item: ShopFoodItem) {
+        // ✅ 売り切れは従来通り（保険）
+        guard item.stock > 0 else { return }
+
+        // ✅ 所持不足 → 中央に文字表示
+        guard state.walletKcal >= item.kcal else {
+            dismissInsufficientTask?.cancel()
+            popup = .insufficient
+
+            // ✅ 少しだけ見せて自動で消す（文字だけ要件）
+            dismissInsufficientTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                if case .insufficient = popup {
+                    popup = .none
+                }
+            }
+
+            Haptics.rattle(duration: 0.12, style: .light)
+            return
+        }
+
+        // ✅ 購入確認ポップアップ
+        dismissInsufficientTask?.cancel()
+        dismissInsufficientTask = nil
+        popup = .confirm(item)
+        Haptics.tap(style: .light)
     }
 
     private func save() {
@@ -75,40 +132,110 @@ struct ShopView: View {
     }
 }
 
-// MARK: - Wallet summary
+// MARK: - Popup state
 
-private struct WalletSummaryCard: View {
+private enum PurchasePopupState: Equatable {
+    case none
+    case insufficient
+    case confirm(ShopFoodItem)
+
+    var isPresented: Bool {
+        switch self {
+        case .none: return false
+        default: return true
+        }
+    }
+}
+
+// MARK: - Fixed wallet header（HomeViewの通貨表示と同系）
+
+private struct ShopWalletHeader: View {
     let walletKcal: Int
-    let pendingKcal: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("所持kcal（通貨）").font(.headline)
+        HStack(spacing: 12) {
+            Image("coin_Icon")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 30, height: 30)
 
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("所持").font(.caption).foregroundStyle(.secondary)
-                    Text("\(walletKcal) kcal")
-                        .font(.title2).bold()
-                        .monospacedDigit()
-                }
-                Spacer()
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("未反映").font(.caption).foregroundStyle(.secondary)
-                    Text("\(pendingKcal) kcal").font(.title3).bold()
-                }
+            ZStack {
+                Capsule()
+                    .fill(Color.black.opacity(0.85))
+                    .frame(height: 34)
+
+                Text("\(walletKcal)")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(.white)
+                    .monospacedDigit()
+                    .padding(.horizontal, 18)
             }
 
-            Text("※ 通貨kcal = アクティブ + 安静時（1日の合計）")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Text("※ 料理の価格＝kcal（所持から消費）")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            Spacer()
         }
-        .padding()
-        .background(.thinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Popup overlay
+
+private struct PurchasePopupOverlay: View {
+    @Binding var popup: PurchasePopupState
+    let onConfirmBuy: (ShopFoodItem) -> Void
+
+    var body: some View {
+        ZStack {
+            // 背景（タップで閉じる）
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { popup = .none }
+
+            switch popup {
+            case .none:
+                EmptyView()
+
+            case .insufficient:
+                // ✅ 仕様：不足時は文字のみ
+                Text("所持Kcalが不足しています")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
+                    .background(Color.black.opacity(0.85))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .onTapGesture { popup = .none }
+
+            case .confirm(let item):
+                VStack(spacing: 14) {
+                    // ✅ 仕様：画像不要、文字は大きめ
+                    Text("\(item.name) を購入しますか？")
+                        .font(.system(size: 18, weight: .bold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+
+                    HStack(spacing: 12) {
+                        Button("キャンセル") {
+                            popup = .none
+                            Haptics.tap(style: .light)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.white.opacity(0.85))
+
+                        Button("購入") {
+                            onConfirmBuy(item)
+                            Haptics.tap(style: .medium)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(18)
+                .background(Color.black.opacity(0.85))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .padding(.horizontal, 28)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: popup.isPresented)
     }
 }
 
@@ -119,7 +246,8 @@ private struct DailyShopCard: View {
     let rewardResetsToday: Int
     let maxRewardResetsPerDay: Int
 
-    let onBuy: (ShopFoodItem) -> Void
+    // ✅ 仕様変更：購入タップはポップアップ経由に
+    let onBuyTap: (ShopFoodItem) -> Void
     let onRewardReset: () -> Void
 
     var body: some View {
@@ -144,13 +272,32 @@ private struct DailyShopCard: View {
                 VStack(spacing: 10) {
                     ForEach(items) { item in
                         HStack(spacing: 12) {
+
+                            // ✅ 仕様変更：商品名の先頭に各商品のアセット画像
+                            let asset = FoodCatalog.byId(item.id)?.assetName
+                            if let asset {
+                                Image(asset)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 34, height: 34)
+                                    .padding(6)
+                                    .background(Color.white.opacity(0.18))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(Color.black.opacity(0.35), lineWidth: 1)
+                                    )
+                            }
+
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.name).font(.headline)
                                 Text("\(item.kcal) kcal")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
+
                             Spacer()
+
                             Text(item.stock > 0 ? "在庫1" : "売切")
                                 .font(.caption)
                                 .padding(.horizontal, 10)
@@ -158,7 +305,7 @@ private struct DailyShopCard: View {
                                 .background(.ultraThinMaterial)
                                 .clipShape(Capsule())
 
-                            Button("購入") { onBuy(item) }
+                            Button("購入") { onBuyTap(item) }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(item.stock == 0)
                                 .opacity(item.stock == 0 ? 0.6 : 1.0)

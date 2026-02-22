@@ -80,7 +80,6 @@ final class PlaceNameResolver: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 3) 「都道府県 + 市区町村」(例: 千葉県船橋市)
-        // ✅ ここで型推論が崩れることがあるので、戻り型を明示して安定化
         let parts: [String] = [admin, locality]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
@@ -157,7 +156,7 @@ struct MemoriesView: View {
         let isShowingEmpty = (mode == .day) ? todayEntries.isEmpty : entries.isEmpty
 
         ZStack {
-            Color(red: 0.35, green: 0.86, blue: 0.88).ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 12) {
                 modeHeader
@@ -168,7 +167,7 @@ struct MemoriesView: View {
 
                 if isShowingEmpty {
                     emptyView
-                    Spacer(minLength: 0) // ✅ 空状態でも上寄せを維持
+                    Spacer(minLength: 0)
                 } else {
                     ScrollView {
                         switch mode {
@@ -181,12 +180,10 @@ struct MemoriesView: View {
                     }
                 }
             }
-            // ✅ 空状態でVStackが中央寄りにならないよう、常に上寄せ固定
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
 
-            // ✅ 保存/ダウンロード等のトースト：画面中央に表示（最前面）
             if showToast, let toastMessage {
                 Text(toastMessage)
                     .font(.headline)
@@ -201,10 +198,20 @@ struct MemoriesView: View {
                     .allowsHitTesting(false)
             }
         }
+        .background(
+            ZStack {
+                Image("Omoide_background")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+            }
+        )
         .navigationTitle("思い出")
         .navigationBarTitleDisplayMode(.inline)
 
-        // ✅ DayPhotosView は “別ファイル” のものを開く（重複定義しない）
         .sheet(item: $sheetItem) { item in
             DayPhotosView(
                 dayKey: item.dayKey,
@@ -215,7 +222,6 @@ struct MemoriesView: View {
             )
         }
 
-        // ✅ ViewModel.toastMessage を購読して必ずトーストを出す
         .onReceive(viewModel.$toastMessage.compactMap { $0 }) { msg in
             toast(msg)
             viewModel.consumeToast()
@@ -227,7 +233,6 @@ struct MemoriesView: View {
             }
         }
 
-        // ✅ 次の00:00で now を更新 → day表示が自動で空になる
         .task {
             scheduleNextMidnightRefresh()
         }
@@ -281,10 +286,11 @@ struct MemoriesView: View {
             ForEach(Array(symbols.enumerated()), id: \.offset) { idx, s in
                 let weekday = weekdayNumberForColumnIndex(idx) // 1=Sun ... 7=Sat
                 let color: Color = {
-                    if weekday == 7 { return Color.blue.opacity(0.55) } // sat
-                    if weekday == 1 { return Color.red.opacity(0.55) }  // sun
-                    return Color.secondary
+                    if weekday == 7 { return .blue } // sat
+                    if weekday == 1 { return .red }  // sun
+                    return .black
                 }()
+
                 Text(s)
                     .font(.caption2)
                     .foregroundStyle(color)
@@ -315,8 +321,9 @@ struct MemoriesView: View {
                 if let day = slots[index] {
                     dayCell(for: day, entryMap: entryMap)
                 } else {
+                    // ✅ 空スロットも「白ベタ」で見やすく（opacityなし）
                     RoundedRectangle(cornerRadius: mode.cellCornerRadius)
-                        .fill(Color.white.opacity(0.2))
+                        .fill(Color.white)
                         .frame(height: mode.cellHeight)
                 }
             }
@@ -324,7 +331,6 @@ struct MemoriesView: View {
         .padding(.top, 4)
     }
 
-    // ✅ day：縦に写真が並ぶ（撮影時間の降順）
     private func dayList(entries: [TodayPhotoEntry]) -> some View {
         LazyVStack(spacing: 10) {
             ForEach(entries) { e in
@@ -334,12 +340,9 @@ struct MemoriesView: View {
         .padding(.top, 4)
     }
 
-    /// ✅ ForEach内の型推論を軽くするため分離
     @ViewBuilder
     private func dayRowView(entry e: TodayPhotoEntry) -> some View {
         let key = placeKey(for: e)
-
-        // ✅ 保存済み placeName を最優先。なければ resolver の結果
         let place = e.placeName ?? placeResolver.placeName(for: key)
 
         DayRow(
@@ -348,7 +351,6 @@ struct MemoriesView: View {
             placeName: place
         )
         .onTapGesture {
-            // ✅ 仕様：シートのタイトルも「場所 の おもいで」
             sheetItem = DayPhotosSheetItem(
                 dayKey: e.dayKey,
                 initialFileName: e.fileName,
@@ -360,7 +362,6 @@ struct MemoriesView: View {
                 viewModel.loadImageIfNeeded(fileName: e.fileName)
             }
 
-            // ✅ 地名解決（placeNameが無い時だけ）
             if e.placeName == nil {
                 placeResolver.resolveIfNeeded(
                     key: key,
@@ -380,15 +381,14 @@ struct MemoriesView: View {
 
         let cached = viewModel.thumbnailImage(for: key)
 
-        // ✅ monthの土日カラー（文字色は維持）
+        // ✅ monthの土日カラー（opacityなし / 平日は黒）
         let weekday = cal.component(.weekday, from: date) // 1=Sun ... 7=Sat
-        let weekendColor: Color? = {
-            if weekday == 7 { return Color.blue.opacity(0.55) }
-            if weekday == 1 { return Color.red.opacity(0.55) }
-            return nil
+        let weekendColor: Color = {
+            if weekday == 7 { return .blue }
+            if weekday == 1 { return .red }
+            return .black
         }()
 
-        // ✅ monthタップ時のタイトル用：entry がある場合に place を引ける
         let monthPlace: String? = {
             guard let entry else { return nil }
             let pKey = placeKey(for: entry)
@@ -398,7 +398,7 @@ struct MemoriesView: View {
         return VStack(spacing: 2) {
             Text(dayNumber(for: date))
                 .font(.caption2)
-                .foregroundStyle(weekendColor ?? Color.secondary)
+                .foregroundStyle(weekendColor)
 
             Group {
                 if let img = cached {
@@ -406,17 +406,16 @@ struct MemoriesView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.white.opacity(0.12))
+                        .background(Color.white) // ✅ 透明感をやめる
                 } else if let entry {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.28))
-                        .overlay { ProgressView().tint(.white.opacity(0.9)) }
+                        .fill(Color.white) // ✅ 透明感をやめる
+                        .overlay { ProgressView().tint(.gray) }
                         .onAppear {
                             if viewModel.thumbnailImage(for: key) == nil {
                                 viewModel.loadThumbnailIfNeeded(dayKey: key, fileName: entry.fileName)
                             }
 
-                            // ✅ 月表示でも先に地名解決しておく（placeNameが無い時だけ）
                             if entry.placeName == nil {
                                 placeResolver.resolveIfNeeded(
                                     key: placeKey(for: entry),
@@ -427,11 +426,11 @@ struct MemoriesView: View {
                         }
                 } else {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.white.opacity(0.28))
+                        .fill(Color.white) // ✅ 透明感をやめる
                         .overlay {
                             Image(systemName: "camera")
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(.black.opacity(0.6))
                         }
                 }
             }
@@ -441,14 +440,17 @@ struct MemoriesView: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .padding(4)
+
+        // ✅ カードの背景を白ベタに（opacityなし）
         .background(
             RoundedRectangle(cornerRadius: mode.cellCornerRadius)
-                .fill(Color.white.opacity(0.22))
+                .fill(Color.white)
         )
+
         .overlay {
             if isToday {
                 RoundedRectangle(cornerRadius: mode.cellCornerRadius)
-                    .stroke(Color.white.opacity(0.9), lineWidth: 2)
+                    .stroke(Color(red: 0.6, green: 0.0, blue: 0.0), lineWidth: 2)
             }
         }
         .contentShape(Rectangle())
@@ -457,7 +459,6 @@ struct MemoriesView: View {
             sheetItem = DayPhotosSheetItem(
                 dayKey: key,
                 initialFileName: nil,
-                // ✅ 仕様：月グリッドから開いても「場所 の おもいで」
                 titleText: sheetTitleText(placeName: monthPlace)
             )
         }
@@ -537,16 +538,6 @@ struct MemoriesView: View {
         }
     }
 
-    private func dayTitleText(_ dayKey: String) -> String {
-        if dayKey.count == 8 {
-            let y = dayKey.prefix(4)
-            let m = dayKey.dropFirst(4).prefix(2)
-            let d = dayKey.suffix(2)
-            return "\(y)/\(m)/\(d)"
-        }
-        return dayKey
-    }
-
     private func todayHeaderDateText(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "ja_JP")
@@ -554,12 +545,10 @@ struct MemoriesView: View {
         return f.string(from: date)
     }
 
-    // ✅ placeName のキャッシュKey（同じ写真=同じfileNameでOK）
     private func placeKey(for entry: TodayPhotoEntry) -> String {
         entry.fileName
     }
 
-    // ✅ シートのタイトル（場所優先）
     private func sheetTitleText(placeName: String?) -> String {
         let trimmed = placeName?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let trimmed, !trimmed.isEmpty {
@@ -595,11 +584,7 @@ struct MemoriesView: View {
 private struct DayRow: View {
     let entry: TodayPhotoEntry
     let thumb: UIImage?
-
-    // ✅ 地名（取れなければ nil）
     let placeName: String?
-
-    private let bg = Color.white.opacity(0.22)
 
     var body: some View {
         HStack(spacing: 12) {
@@ -634,7 +619,14 @@ private struct DayRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(12)
-        .background(bg, in: RoundedRectangle(cornerRadius: 16))
+        .background {
+            ZStack {
+                Image("Omoide_card")
+                    .resizable()
+                    .scaledToFill()
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func titleLine() -> String {

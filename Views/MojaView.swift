@@ -16,6 +16,7 @@ struct MojaView: View {
 
     var body: some View {
         ZStack {
+            // ✅ 元の背景（レイアウト維持のため残す）
             Color.black.opacity(0.05).ignoresSafeArea()
 
             VStack(spacing: 14) {
@@ -97,6 +98,18 @@ struct MojaView: View {
                 .transition(.opacity)
             }
         }
+        // ✅ 背景画像は「後ろに描画」するだけ（中身のレイアウトに干渉しにくい）
+        .background(
+            ZStack {
+                Image("Moja_background")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+            }
+        )
         .navigationTitle("もじゃ合わせ")
         .navigationBarTitleDisplayMode(.inline)
 

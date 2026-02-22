@@ -32,7 +32,8 @@ struct SettingsView: View {
         let state = ensureAppState()
 
         ZStack {
-            bgColor.ignoresSafeArea()
+            // ✅ 背景画像を見せたいのでベタ塗りはしない（レイアウトは変わらない）
+            Color.clear.ignoresSafeArea()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -68,7 +69,6 @@ struct SettingsView: View {
 
                                 Button("編集") {
                                     errorMessage = nil
-                                    // 編集開始時に現在値を反映
                                     goalText = state.dailyGoalKcal > 0 ? String(state.dailyGoalKcal) : ""
                                     withAnimation(.easeInOut(duration: 0.15)) {
                                         isEditingGoal = true
@@ -91,7 +91,6 @@ struct SettingsView: View {
 
                                 Button("キャンセル") {
                                     errorMessage = nil
-                                    // 入力を現在値に戻して終了
                                     goalText = state.dailyGoalKcal > 0 ? String(state.dailyGoalKcal) : ""
                                     withAnimation(.easeInOut(duration: 0.15)) {
                                         isEditingGoal = false
@@ -136,13 +135,23 @@ struct SettingsView: View {
                 }
             }
         }
+        // ✅ 背景画像（＋暗幕）を後ろに描画
+        .background(
+            ZStack {
+                Image("setting_background")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+            }
+        )
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            // 初回表示時：編集状態はOFF、表示用テキストは現在値に合わせる
             isEditingGoal = false
             goalText = state.dailyGoalKcal > 0 ? String(state.dailyGoalKcal) : ""
 
-            // ✅ すでにgoalが入っているなら「初回設定済み」とみなす（端末移行/デバッグでも破綻しにくく）
             if state.dailyGoalKcal > 0, didSetDailyGoalOnce == false {
                 didSetDailyGoalOnce = true
             }
@@ -165,7 +174,6 @@ struct SettingsView: View {
         do {
             try modelContext.save()
 
-            // ✅ 保存できたら「初回設定済み」にする（Homeでシートが二度と出ない）
             didSetDailyGoalOnce = true
 
             Haptics.rattle(duration: 0.18, style: .light)

@@ -46,7 +46,19 @@ struct DayPhotosView: View {
         NavigationStack {
             GeometryReader { geo in
                 ZStack {
-                    Color(red: 0.35, green: 0.86, blue: 0.88).ignoresSafeArea()
+                    // ✅ monthタップ → シートで出る画面（カード）の背景を画像にする
+                    //    既存UIレイアウトに影響しないよう、最背面に敷くだけ
+                    Image("Omoide_card")
+                        .resizable()
+                        .scaledToFill()
+                        .ignoresSafeArea()
+
+                    // ✅ 読みやすさ用の薄い暗幕（不要なら opacity を 0 にしてOK）
+                    Color.black.opacity(0.18)
+                        .ignoresSafeArea()
+
+                    // ✅ これまでの青ベタ背景は撤去（ここが背景画像を隠していた）
+                    // Color(red: 0.35, green: 0.86, blue: 0.88).ignoresSafeArea()
 
                     if dayEntries.isEmpty {
                         VStack(spacing: 12) {
@@ -81,9 +93,9 @@ struct DayPhotosView: View {
                                             }
                                         )
                                         .frame(width: geo.size.width, height: geo.size.height)
-                                        .scrollTargetLayout()
-                                        .id(e.persistentModelID) // ✅ scrollTo 用（安定）
+                                        .id(e.fileName)
                                         .onAppear {
+                                            // ✅ 画像がまだなら読み込み
                                             if viewModel.image(forFileName: e.fileName) == nil {
                                                 viewModel.loadImageIfNeeded(fileName: e.fileName)
                                             }
@@ -91,89 +103,62 @@ struct DayPhotosView: View {
                                     }
                                 }
                             }
-                            .scrollIndicators(.hidden)
                             .scrollTargetBehavior(.paging)
+                            .scrollIndicators(.hidden)
                             .onAppear {
-                                // ✅ 初回だけ “タップ位置” に合わせて開く
-                                if let initialFileName,
-                                   let target = dayEntries.first(where: { $0.fileName == initialFileName }) {
+                                // ✅ 最初に表示したい写真へジャンプ
+                                if let initialFileName {
                                     DispatchQueue.main.async {
-                                        proxy.scrollTo(target.persistentModelID, anchor: .top)
+                                        proxy.scrollTo(initialFileName, anchor: .center)
                                     }
                                 }
                             }
                         }
                     }
 
-                    // ✅ 画面中央トースト（保存完了など）
-                    if showCenterToast, let centerToastMessage {
-                        CenterToastView(message: centerToastMessage)
+                    // ✅ 中央トースト（最前面）
+                    if showCenterToast, let msg = centerToastMessage {
+                        CenterToastView(message: msg)
                             .transition(.opacity.combined(with: .scale))
-                            .zIndex(9999)
+                            .zIndex(999)
+                            .allowsHitTesting(false)
                     }
                 }
             }
-
-            // ✅ 修正：ナビゲーションバーに “写真情報のタイトル” を出さない
-            // （赤丸部分を消すため、title は空にする）
-            .navigationTitle("")
+            .navigationTitle(titleText)
             .navigationBarTitleDisplayMode(.inline)
-
             .toolbar {
-                // ✅ 修正：中央（principal）も空にして、上部に文字が残らないようにする
-                ToolbarItem(placement: .principal) {
-                    Color.clear.frame(width: 0, height: 0)
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button("閉じる") { dismiss() }
                 }
-            }
-
-            // ✅ 既存：ViewModelのtoastMessageを購読（ただし「保存しました！」は中央表示で統一）
-            .onChange(of: viewModel.toastMessage) { _, msg in
-                guard let msg else { return }
-
-                if msg.contains("保存しました") {
-                    showCenterToastNow("保存しました！")
-                } else {
-                    onToast(msg)
-                }
-                viewModel.consumeToast()
             }
         }
     }
 
-    // MARK: - Title formatting
+    // MARK: - Place title
 
-    /// ✅ カードタイトル（旧：撮影 HH:mm）→（新：場所 の おもいで）
     private func placeTitleText(for entry: TodayPhotoEntry) -> String {
-        let raw = entry.placeName?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let raw, !raw.isEmpty {
-            return "\(raw) の おもいで"
-        } else {
-            // 位置情報が無い/拒否/未取得の場合
-            return "おもいで"
+        let trimmed = entry.placeName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            return trimmed
         }
+        return "おもいで"
     }
 
     // MARK: - Center toast
 
     private func showCenterToastNow(_ message: String) {
         centerToastMessage = message
-        withAnimation(.easeInOut(duration: 0.15)) {
-            showCenterToast = true
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
-            withAnimation(.easeInOut(duration: 0.15)) {
-                showCenterToast = false
-            }
+        withAnimation(.easeInOut(duration: 0.18)) { showCenterToast = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation(.easeInOut(duration: 0.18)) { showCenterToast = false }
         }
     }
 }
 
-private struct PhotoPage: View {
+// MARK: - Page
+
+struct PhotoPage: View {
     let entry: TodayPhotoEntry
     let image: UIImage?
     let timeText: String
@@ -250,7 +235,6 @@ private struct CenterToastView: View {
             // ちょい下に余白（視認性）
             Spacer().frame(height: 8)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .allowsHitTesting(false)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

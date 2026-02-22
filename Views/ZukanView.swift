@@ -14,22 +14,18 @@ struct ZukanView: View {
 
     private var state: AppState? { appStates.first }
 
-    // ✅ 初期実装予定：12体ぶんを常に表示（正本は AppState.initialZukanPetIDs）
     private var initialPetIDs: [String] { AppState.initialZukanPetIDs }
-
-    // ✅ 1列4キャラ
     private let columns: [GridItem] = Array(repeating: GridItem(.flexible(), spacing: 10), count: 4)
 
-    // ✅ 下半分表示用：選択中キャラ（デフォルトは育成中）
     @State private var selectedPetID: String? = nil
 
     var body: some View {
         ZStack {
-            Color(red: 0.35, green: 0.86, blue: 0.88).ignoresSafeArea()
+            // ✅ 背景画像を見せたいので、ベタ塗りをやめる（レイアウトは変わらない）
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 14) {
                 if let state {
-                    // --- 上半分：図鑑グリッド ---
                     ZukanGrid(
                         petIDs: initialPetIDs,
                         ownedIDs: Set(state.ownedPetIDs()),
@@ -42,7 +38,6 @@ struct ZukanView: View {
                     )
                     .padding(.top, 6)
 
-                    // --- 下半分：詳細（画像 / 説明 / 育成ボタン） ---
                     ZukanDetailPanel(
                         state: state,
                         selectedPetID: selectedPetID ?? state.currentPetID,
@@ -63,6 +58,17 @@ struct ZukanView: View {
             }
             .padding(.horizontal, 16)
         }
+        .background(
+            ZStack {
+                Image("Zukan_background")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+            }
+        )
         .navigationTitle("図鑑")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -102,7 +108,7 @@ private struct ZukanGrid: View {
                         isCurrent: isCurrent,
                         isSelected: (selectedPetID == id),
                         onTap: {
-                            guard isOwned else { return } // ✅ 未獲得は反応しない
+                            guard isOwned else { return }
                             onSelect(id)
                         }
                     )
@@ -149,20 +155,18 @@ private struct ZukanCell: View {
             .background(.thinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay {
-                // ✅ 育成中キャラ：太め黒枠
                 if isCurrent {
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(.black, lineWidth: 3)
                 } else if isSelected {
-                    // ✅ 選択中（育成中とは別）：薄い枠（任意）
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(.black.opacity(0.18), lineWidth: 1)
                 }
             }
-            .opacity(isOwned ? 1.0 : 0.7)   // ✅ 未獲得は暗く
+            .opacity(isOwned ? 1.0 : 0.7)
         }
         .buttonStyle(.plain)
-        .disabled(!isOwned)               // ✅ 未獲得はタップ無効
+        .disabled(!isOwned)
     }
 }
 
@@ -191,7 +195,6 @@ private struct ZukanDetailPanel: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            // ✅ 緑枠：育成ボタン
             Button {
                 onTrain(selectedPetID)
             } label: {
@@ -204,9 +207,7 @@ private struct ZukanDetailPanel: View {
             .disabled(isCurrent)
             .opacity(isCurrent ? 0.6 : 1.0)
 
-            // ✅ 赤（画像）＋青（説明）
             HStack(spacing: 12) {
-                // 画像（赤枠想定）
                 VStack {
                     Image(selectedImageName)
                         .resizable()
@@ -217,7 +218,6 @@ private struct ZukanDetailPanel: View {
                 .background(.thinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                // 説明（青枠想定）
                 VStack(alignment: .leading, spacing: 8) {
                     Text(selectedName)
                         .font(.headline)
