@@ -14,6 +14,9 @@ struct MojaView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel = MojaViewModel()
 
+    // ✅ 「いますぐ確認」→ 図鑑へ遷移
+    @State private var navigateToZukan: Bool = false
+
     var body: some View {
         ZStack {
             // ✅ 元の背景（レイアウト維持のため残す）
@@ -21,7 +24,7 @@ struct MojaView: View {
 
             VStack(spacing: 14) {
 
-                // ① もじゃの画像
+                // ① もじゃの画像（✅ 0到達後は CalPet_secret 固定）
                 Image(viewModel.currentFusionAssetName())
                     .resizable()
                     .scaledToFit()
@@ -32,36 +35,47 @@ struct MojaView: View {
                     HStack(spacing: 8) {
                         Text("まとまるまで")
                             .font(.headline)
-                        Text(viewModel.fusionIsRunning
-                             ? viewModel.formattedRemaining(now: context.date)
-                             : "06:00:00")
+
+                        Text(viewModel.formattedDisplayTime(now: context.date))
                             .monospacedDigit()
                             .font(.headline)
                     }
                     .padding(.top, 2)
                 }
 
-                // ③ (moja) をまとめるボタン
+                // ③ ボタン（✅ 完了後は「新しいカルペットをGET」に変更）
                 Button {
-                    viewModel.startFusion(now: Date())
-                    save()
+                    if viewModel.fusionIsReadyToClaim {
+                        // ✅ 新キャラ獲得 + 状態リセット + ポップアップ表示
+                        viewModel.claimNewPet(state: state)
+                        save()
+                    } else {
+                        // ✅ まとめ開始
+                        viewModel.startFusion(now: Date())
+                        save()
+                    }
                 } label: {
                     HStack(spacing: 8) {
-                        Image("moja")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 20, height: 20)
+                        if viewModel.fusionIsReadyToClaim {
+                            Text("新しいカルペットをGET")
+                                .font(.headline)
+                        } else {
+                            Image("moja")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 20, height: 20)
 
-                        Text("をまとめる")
-                            .font(.headline)
+                            Text("をまとめる")
+                                .font(.headline)
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(.horizontal, 18)
-                .disabled(viewModel.fusionIsRunning || viewModel.mojaCount < viewModel.fusionCost)
-                .opacity((viewModel.fusionIsRunning || viewModel.mojaCount < viewModel.fusionCost) ? 0.5 : 1.0)
+                .disabled(viewModel.isActionButtonDisabled)
+                .opacity(viewModel.isActionButtonDisabled ? 0.5 : 1.0)
 
                 // ④ 所持している (moja)
                 HStack(spacing: 6) {
@@ -83,6 +97,26 @@ struct MojaView: View {
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
+            // ✅ 獲得ポップアップ（中央）
+            if viewModel.showRewardPopup, let petID = viewModel.rewardedPetID {
+                RewardPopup(
+                    petAssetName: PetMaster.assetName(for: petID),
+                    onClose: {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            viewModel.showRewardPopup = false
+                        }
+                    },
+                    onGoNow: {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            viewModel.showRewardPopup = false
+                        }
+                        // ✅ 図鑑へ
+                        navigateToZukan = true
+                    }
+                )
+                .transition(.opacity)
+            }
+
             // 中央トースト
             if viewModel.showCenterToast, let msg = viewModel.centerToastMessage {
                 VStack {
@@ -97,6 +131,14 @@ struct MojaView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.opacity)
             }
+
+            // ✅ 画面遷移用（隠し NavigationLink）
+            NavigationLink(isActive: $navigateToZukan) {
+                ZukanView()
+            } label: {
+                EmptyView()
+            }
+            .hidden()
         }
         // ✅ 背景画像は「後ろに描画」するだけ（中身のレイアウトに干渉しにくい）
         .background(
@@ -123,5 +165,48 @@ struct MojaView: View {
 
     private func save() {
         do { try modelContext.save() } catch { }
+    }
+}
+
+private struct RewardPopup: View {
+    let petAssetName: String
+    let onClose: () -> Void
+    let onGoNow: () -> Void
+
+    var body: some View {
+        ZStack {
+            // 背景暗幕
+            Color.black.opacity(0.45)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    // 画面外タップで閉じてもいいが、仕様にないので無効化したい場合は削除OK
+                    onClose()
+                }
+
+            VStack(spacing: 14) {
+                Image(petAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 220, height: 220)
+
+                HStack(spacing: 12) {
+                    Button("とじる") {
+                        onClose()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("いますぐ確認") {
+                        onGoNow()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .shadow(radius: 12)
+            .padding(.horizontal, 22)
+        }
     }
 }
