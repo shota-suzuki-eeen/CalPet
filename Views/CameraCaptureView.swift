@@ -96,6 +96,10 @@ struct CameraCaptureView: View {
     let todayTotalKcal: Int
     let plainBackgroundAssetName: String
 
+    // ✅ 追加：撮影画面に表示するキャラ（ホームで育成中のキャラ想定）
+    // 既存呼び出しを壊さないため init でデフォルト "purpor" を入れる
+    let characterAssetName: String
+
     @State private var mode: Mode
 
     @State private var characterOffset: CGSize = .zero
@@ -130,6 +134,7 @@ struct CameraCaptureView: View {
         todayActiveKcal: Int,
         todayTotalKcal: Int,
         plainBackgroundAssetName: String,
+        characterAssetName: String = "purpor", // ✅ 互換維持
         onCancel: @escaping () -> Void,
         onCapture: @escaping (UIImage) -> Void,
         onCaptureWithPlace: ((UIImage, String?, Double?, Double?) -> Void)? = nil
@@ -139,6 +144,7 @@ struct CameraCaptureView: View {
         self.todayActiveKcal = todayActiveKcal
         self.todayTotalKcal = todayTotalKcal
         self.plainBackgroundAssetName = plainBackgroundAssetName
+        self.characterAssetName = characterAssetName
         self.onCancel = onCancel
         self.onCapture = onCapture
         self.onCaptureWithPlace = onCaptureWithPlace
@@ -163,7 +169,8 @@ struct CameraCaptureView: View {
                         updateWindowSafeArea()
                     }
 
-                Image("purpor")
+                // ✅ 変更：固定 "purpor" → 渡された characterAssetName
+                Image(characterAssetName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: characterW)
@@ -410,6 +417,7 @@ struct CameraCaptureView: View {
             let composed = composeFinalImage(
                 background: normalizedBackground,
                 viewSize: viewSize,
+                characterAssetName: characterAssetName, // ✅ 追加
                 characterOffset: fixedOffset,
                 characterScale: fixedScale,
                 metricOverlayImage: fixedMetricImage
@@ -432,6 +440,7 @@ struct CameraCaptureView: View {
     private func composeFinalImage(
         background: UIImage,
         viewSize: CGSize,
+        characterAssetName: String,
         characterOffset: CGSize,
         characterScale: CGFloat,
         metricOverlayImage: UIImage?
@@ -444,9 +453,10 @@ struct CameraCaptureView: View {
         let baseCharacterWidthInView = min(viewSize.width * 0.45, 220)
         let finalCharacterWidthInView = baseCharacterWidthInView * characterScale
 
-        let purpor = UIImage(named: "purpor") ?? UIImage()
+        // ✅ 変更：固定 "purpor" → 受け取った assetName
+        let characterImage = UIImage(named: characterAssetName) ?? UIImage()
         let characterWidth = finalCharacterWidthInView * sx
-        let aspect = purpor.size.height / max(purpor.size.width, 1)
+        let aspect = characterImage.size.height / max(characterImage.size.width, 1)
         let characterHeight = characterWidth * aspect
 
         let centerXInView = viewSize.width / 2 + characterOffset.width
@@ -468,7 +478,7 @@ struct CameraCaptureView: View {
         let renderer = UIGraphicsImageRenderer(size: bgSize, format: format)
         return renderer.image { ctx in
             background.draw(in: CGRect(origin: .zero, size: bgSize))
-            purpor.draw(in: drawRect)
+            characterImage.draw(in: drawRect)
 
             if let metricOverlayImage {
                 ctx.cgContext.saveGState()

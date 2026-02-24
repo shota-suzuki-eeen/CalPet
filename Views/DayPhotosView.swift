@@ -57,9 +57,6 @@ struct DayPhotosView: View {
                     Color.black.opacity(0.18)
                         .ignoresSafeArea()
 
-                    // ✅ これまでの青ベタ背景は撤去（ここが背景画像を隠していた）
-                    // Color(red: 0.35, green: 0.86, blue: 0.88).ignoresSafeArea()
-
                     if dayEntries.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "photo")
@@ -70,8 +67,9 @@ struct DayPhotosView: View {
                         }
                     } else {
                         ScrollViewReader { proxy in
-                            ScrollView(.vertical) {
-                                LazyVStack(spacing: 0) {
+                            // ✅ 仕様変更：左右スワイプ（横ページング）
+                            ScrollView(.horizontal) {
+                                LazyHStack(spacing: 0) {
                                     ForEach(dayEntries) { e in
                                         PhotoPage(
                                             entry: e,

@@ -33,6 +33,9 @@ struct ShopView: View {
                         items: viewModel.decodeShopItems(from: state) ?? [],
                         rewardResetsToday: state.shopRewardResetsToday,
                         maxRewardResetsPerDay: 2,
+                        ownedCountProvider: { itemID in
+                            viewModel.ownedCount(for: itemID, state: state)
+                        },
                         onBuyTap: { item in
                             onTapBuy(item)
                         },
@@ -246,6 +249,9 @@ private struct DailyShopCard: View {
     let rewardResetsToday: Int
     let maxRewardResetsPerDay: Int
 
+    // ✅ 追加：所持数を外から注入（ViewModelやStateを直接持たない）
+    let ownedCountProvider: (String) -> Int
+
     // ✅ 仕様変更：購入タップはポップアップ経由に
     let onBuyTap: (ShopFoodItem) -> Void
     let onRewardReset: () -> Void
@@ -260,7 +266,8 @@ private struct DailyShopCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("毎日 00:00 更新 / 6品 / 在庫 各1個")
+            // ✅ 表示文言としての「在庫」はやめる（所持数が主役になるため）
+            Text("毎日 00:00 更新 / 6品")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -298,7 +305,11 @@ private struct DailyShopCard: View {
 
                             Spacer()
 
-                            Text(item.stock > 0 ? "在庫1" : "売切")
+                            // ✅ 仕様変更：在庫表示 → 所持数表示
+                            // - 売切/購入可否は stock で管理（従来通り）
+                            // - 表示は ownedCount（ユーザー所持数）
+                            let owned = ownedCountProvider(item.id)
+                            Text("所持\(owned)")
                                 .font(.caption)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 4)

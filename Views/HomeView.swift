@@ -457,7 +457,8 @@ struct HomeView: View {
                 todaySteps: hk.todaySteps,
                 todayActiveKcal: hk.todayActiveEnergyKcal,
                 todayTotalKcal: hk.todayTotalEnergyKcal,
-                plainBackgroundAssetName: Layout.homeBackgroundAssetName
+                plainBackgroundAssetName: Layout.homeBackgroundAssetName,
+                characterAssetName: PetMaster.assetName(for: state.currentPetID) // ✅ 追加
             ) {
                 selectedCaptureMode = nil
             } onCapture: { image in

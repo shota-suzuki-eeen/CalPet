@@ -38,6 +38,13 @@ final class ShopViewModel: ObservableObject {
         return try? JSONDecoder().decode([ShopFoodItem].self, from: data)
     }
 
+    // ✅ 追加：所持数（インベントリ数）を取得するヘルパー
+    // - 「在庫（=当日購入可否）」とは別概念なので、stock は触らない
+    // - 表示側が「所持数」を出したいときに呼ぶ
+    func ownedCount(for itemID: String, state: AppState) -> Int {
+        state.foodCount(foodId: itemID)
+    }
+
     func buyFood(itemID: String, state: AppState) {
         handleDayRolloverIfNeeded(state: state)
         ensureDailyShopIfNeeded(state: state)

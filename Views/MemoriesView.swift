@@ -172,7 +172,8 @@ struct MemoriesView: View {
                     ScrollView {
                         switch mode {
                         case .day:
-                            dayList(entries: todayEntries)
+                            // ✅ 仕様変更：写真アプリ風（横3枚・折り返し）
+                            dayGrid(entries: todayEntries)
 
                         case .month:
                             monthGrid(entryMap: entryMap, columns: columns)
@@ -331,26 +332,44 @@ struct MemoriesView: View {
         .padding(.top, 4)
     }
 
-    private func dayList(entries: [TodayPhotoEntry]) -> some View {
-        LazyVStack(spacing: 10) {
+    // ✅ 仕様変更：day は「3列グリッド」
+    private func dayGrid(entries: [TodayPhotoEntry]) -> some View {
+        let columns: [GridItem] = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
+
+        return LazyVGrid(columns: columns, spacing: 2) {
             ForEach(entries) { e in
-                dayRowView(entry: e)
+                dayGridCell(entry: e)
             }
         }
         .padding(.top, 4)
     }
 
     @ViewBuilder
-    private func dayRowView(entry e: TodayPhotoEntry) -> some View {
+    private func dayGridCell(entry e: TodayPhotoEntry) -> some View {
         let key = placeKey(for: e)
         let place = e.placeName ?? placeResolver.placeName(for: key)
 
-        DayRow(
-            entry: e,
-            thumb: viewModel.image(forFileName: e.fileName),
-            placeName: place
-        )
+        // ✅ 正方形サムネ（写真アプリ風）
+        ZStack {
+            if let img = viewModel.image(forFileName: e.fileName) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipped()
+            } else {
+                Rectangle()
+                    .fill(Color.white.opacity(0.18))
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay {
+                        ProgressView().tint(.white.opacity(0.9))
+                    }
+            }
+        }
+        .contentShape(Rectangle())
         .onTapGesture {
+            // ✅ タップした写真を起点に、同日の写真を左右スワイプで見れる（詳細は DayPhotosView 側で対応）
             sheetItem = DayPhotosSheetItem(
                 dayKey: e.dayKey,
                 initialFileName: e.fileName,
@@ -580,7 +599,7 @@ struct MemoriesView: View {
     }
 }
 
-// MARK: - Day Row
+// MARK: - Day Row（※旧day表示で使用していた行UI。将来戻す可能性があるため残置）
 private struct DayRow: View {
     let entry: TodayPhotoEntry
     let thumb: UIImage?

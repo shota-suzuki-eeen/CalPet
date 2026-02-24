@@ -203,7 +203,7 @@ private struct ZukanDetailPanel: View {
             Button {
                 onTrain(selectedPetID)
             } label: {
-                Text(isCurrent ? "\(selectedName) を育成中" : "\(selectedName) を育成する")
+                Text(isCurrent ? "\(selectedName) をお世話中" : "\(selectedName) をお世話する")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
