@@ -14,8 +14,15 @@ struct MojaView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel = MojaViewModel()
 
+    // ✅ リワード広告（Reward_moja）
+    @StateObject private var rewardedAd = RewardedAdManager(adUnitID: AdUnitID.rewardMoja)
+
     // ✅ 「いますぐ確認」→ 図鑑へ遷移
     @State private var navigateToZukan: Bool = false
+
+    private var isAdShortenButton: Bool {
+        viewModel.fusionIsRunning && !viewModel.fusionIsReadyToClaim
+    }
 
     var body: some View {
         ZStack {
@@ -43,21 +50,48 @@ struct MojaView: View {
                     .padding(.top, 2)
                 }
 
-                // ③ ボタン（✅ 完了後は「新しいカルペットをGET」に変更）
+                // ③ ボタン
                 Button {
                     if viewModel.fusionIsReadyToClaim {
                         // ✅ 新キャラ獲得 + 状態リセット + ポップアップ表示
                         viewModel.claimNewPet(state: state)
                         save()
-                    } else {
-                        // ✅ まとめ開始
-                        viewModel.startFusion(now: Date())
-                        save()
+                        return
                     }
+
+                    if viewModel.fusionIsRunning {
+                        // ✅ 仕様：タイマー動作中は「広告視聴で3時間短縮」
+                        if rewardedAd.isReady {
+                            rewardedAd.show {
+                                // ✅ 報酬：3時間短縮
+                                viewModel.applyAdReduction(
+                                    seconds: 3 * 60 * 60,
+                                    now: Date(),
+                                    state: state
+                                )
+                                save()
+                            }
+                        } else {
+                            // 未ロード時は再ロード（押下体験は保ちつつ、暴発はしない）
+                            rewardedAd.load()
+                        }
+                        return
+                    }
+
+                    // ✅ まとめ開始
+                    viewModel.startFusion(now: Date())
+                    save()
+
+                    // 開始後、念のため次の広告もロードしておく
+                    rewardedAd.load()
+
                 } label: {
                     HStack(spacing: 8) {
                         if viewModel.fusionIsReadyToClaim {
                             Text("新しいカルペットをGET")
+                                .font(.headline)
+                        } else if viewModel.fusionIsRunning {
+                            Text("広告視聴で3時間短縮")
                                 .font(.headline)
                         } else {
                             Image("moja")
@@ -74,8 +108,12 @@ struct MojaView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(.horizontal, 18)
-                .disabled(viewModel.isActionButtonDisabled)
-                .opacity(viewModel.isActionButtonDisabled ? 0.5 : 1.0)
+                // ✅ running中は “広告が準備できたら押せる”
+                .disabled(viewModel.fusionIsReadyToClaim ? false :
+                          viewModel.fusionIsRunning ? !rewardedAd.isReady :
+                          viewModel.isActionButtonDisabled)
+                .opacity((viewModel.fusionIsRunning && !rewardedAd.isReady) ? 0.6 :
+                         (viewModel.isActionButtonDisabled ? 0.5 : 1.0))
 
                 // ④ 所持している (moja)
                 HStack(spacing: 6) {
@@ -160,6 +198,9 @@ struct MojaView: View {
             state.ensureInitialPetsIfNeeded()
             viewModel.onAppearPrepareDemoIfNeeded()
             save()
+
+            // ✅ リワード広告を事前ロード
+            rewardedAd.load()
         }
     }
 
@@ -179,7 +220,6 @@ private struct RewardPopup: View {
             Color.black.opacity(0.45)
                 .ignoresSafeArea()
                 .onTapGesture {
-                    // 画面外タップで閉じてもいいが、仕様にないので無効化したい場合は削除OK
                     onClose()
                 }
 

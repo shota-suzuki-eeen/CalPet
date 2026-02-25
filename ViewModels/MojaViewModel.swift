@@ -42,6 +42,9 @@ final class MojaViewModel: ObservableObject {
     /// 6時間
     private let fusionDuration: TimeInterval = 6 * 60 * 60
 
+    /// ✅ リワード（広告視聴）で短縮する時間：3時間
+    private let rewardReductionSeconds: TimeInterval = 3 * 60 * 60
+
     /// 画像切り替え（仕様：moja → A → B → C → moja...）
     let fusionFrameAssetNames: [String] = [
         "moja",
@@ -86,7 +89,7 @@ final class MojaViewModel: ObservableObject {
     var isActionButtonDisabled: Bool {
         // 受け取り待ちは常に押せる
         if fusionIsReadyToClaim { return false }
-        // 進行中は押せない
+        // 進行中は押せない（※ただしView側で「短縮ボタン」に切り替える想定）
         if fusionIsRunning { return true }
         // もじゃ不足は押せない
         return mojaCount < fusionCost
@@ -173,9 +176,19 @@ final class MojaViewModel: ObservableObject {
         resetFusionToIdle()
     }
 
-    /// 「広告視聴で時間を短縮」押下（デモ：指定秒数だけ短縮）
+    // MARK: - ✅ Reward (Ad) API
+
+    /// ✅ Reward_moja の視聴が「完了した後」に View から呼ぶ想定
+    /// - 仕様：タイマー稼働中に視聴で3時間短縮
+    func applyRewardReduction3Hours(now: Date, state: AppState) {
+        applyAdReduction(seconds: rewardReductionSeconds, now: now, state: state)
+    }
+
+    /// 「広告視聴で時間を短縮」押下（汎用：指定秒数だけ短縮）
+    /// - ※広告の表示は View 側で行い、視聴完了時にこのメソッドを呼ぶ
     func applyAdReduction(seconds: TimeInterval, now: Date, state: AppState) {
         guard fusionIsRunning else { return }
+        guard fusionIsReadyToClaim == false else { return }
         guard let end = fusionEndAt else { return }
 
         let reduce = max(0, seconds)
@@ -185,11 +198,13 @@ final class MojaViewModel: ObservableObject {
         fusionEndAt = newEnd
         persistFusionProgress()
 
-        toastCenter("時間を短縮した！")
+        toastCenter("広告で3時間短縮！")
 
         // 直後に0判定
         syncFusionIfNeeded(now: now)
     }
+
+    // MARK: - View helpers
 
     /// ✅ 現在表示するアセット名（View側で使ってOK）
     /// - 仕様：カウント0になったら CalPet_secret で固定

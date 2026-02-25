@@ -186,7 +186,9 @@ struct HomeView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    Color.clear
+
+                    // ✅ 修正：Home上部バナーは AdMob SDK型を直接触らず、AdBannerView に一本化
+                    AdBannerView(height: Layout.bannerHeight)
                         .frame(height: Layout.bannerHeight)
                         .frame(maxWidth: .infinity)
 

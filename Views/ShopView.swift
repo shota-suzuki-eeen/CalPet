@@ -20,14 +20,15 @@ struct ShopView: View {
     // ✅ 不足表示の自動消し
     @State private var dismissInsufficientTask: Task<Void, Never>?
 
+    // ✅ 置き換え：Reward_food 用 Rewarded 管理
+    @StateObject private var rewardFoodAd = RewardedAdManager(adUnitID: AdUnitID.rewardFood)
+
     var body: some View {
         ZStack {
-            // ✅ 背景画像を見せたいので、ベタ塗りをやめる（レイアウトは変わらない）
             Color.clear.ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 16) {
-                    // ✅ 仕様変更：画面上部の所持カロリー表示は不要（削除）
 
                     DailyShopCard(
                         items: viewModel.decodeShopItems(from: state) ?? [],
@@ -40,14 +41,13 @@ struct ShopView: View {
                             onTapBuy(item)
                         },
                         onRewardReset: {
-                            viewModel.rewardResetShopByAd(state: state, maxPerDay: 2); save()
+                            requestRewardResetByAd()
                         }
                     )
                 }
                 .padding()
-                .padding(.top, 6) // ✅ 固定ヘッダーとの見た目調整（必要なら微調整）
+                .padding(.top, 6)
             }
-            // ✅ 仕様変更：画面上部に固定（スクロールしても見える）
             .safeAreaInset(edge: .top) {
                 ShopWalletHeader(walletKcal: viewModel.displayedWalletKcal)
                     .padding(.top, 8)
@@ -55,12 +55,12 @@ struct ShopView: View {
                     .background(.ultraThinMaterial)
             }
 
-            // ✅ 仕様変更：購入ポップアップ（中央表示）
             if popup.isPresented {
                 PurchasePopupOverlay(
                     popup: $popup,
                     onConfirmBuy: { item in
-                        viewModel.buyFood(itemID: item.id, state: state); save()
+                        viewModel.buyFood(itemID: item.id, state: state)
+                        save()
                         popup = .none
                     }
                 )
@@ -84,10 +84,18 @@ struct ShopView: View {
         .task {
             viewModel.onAppear(state: state)
             save()
+
+            // ✅ 追加：広告ロード
+            rewardFoodAd.load()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             viewModel.onAppear(state: state)
             save()
+
+            // ✅ 復帰時も必要なら再ロード
+            if !rewardFoodAd.isReady {
+                rewardFoodAd.load()
+            }
         }
         .overlay(alignment: .bottom) {
             if viewModel.showToast, let toastMessage = viewModel.toastMessage {
@@ -103,15 +111,12 @@ struct ShopView: View {
     }
 
     private func onTapBuy(_ item: ShopFoodItem) {
-        // ✅ 売り切れは従来通り（保険）
         guard item.stock > 0 else { return }
 
-        // ✅ 所持不足 → 中央に文字表示
         guard state.walletKcal >= item.kcal else {
             dismissInsufficientTask?.cancel()
             popup = .insufficient
 
-            // ✅ 少しだけ見せて自動で消す（文字だけ要件）
             dismissInsufficientTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
                 if case .insufficient = popup {
@@ -123,11 +128,43 @@ struct ShopView: View {
             return
         }
 
-        // ✅ 購入確認ポップアップ
         dismissInsufficientTask?.cancel()
         dismissInsufficientTask = nil
         popup = .confirm(item)
         Haptics.tap(style: .light)
+    }
+
+    // ✅ 置き換え：広告視聴でリセット（Reward_food）
+    private func requestRewardResetByAd() {
+        Haptics.tap(style: .light)
+
+        // もう上限なら何もしない（UIでもdisabledだが保険）
+        guard state.shopRewardResetsToday < 2 else { return }
+
+        // ✅ 広告が準備できていない
+        guard rewardFoodAd.isReady else {
+            viewModel.toastMessage = "広告を読み込み中です…"
+            viewModel.showToast = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                viewModel.showToast = false
+            }
+            rewardFoodAd.load()
+            return
+        }
+
+        // ✅ 視聴完了（報酬獲得）したらここが呼ばれる
+        rewardFoodAd.show {
+            viewModel.rewardResetShopByAd(state: state, maxPerDay: 2)
+            save()
+
+            viewModel.toastMessage = "リセットしました！"
+            viewModel.showToast = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                viewModel.showToast = false
+            }
+
+            Haptics.rattle(duration: 0.18, style: .medium)
+        }
     }
 
     private func save() {
@@ -150,7 +187,7 @@ private enum PurchasePopupState: Equatable {
     }
 }
 
-// MARK: - Fixed wallet header（HomeViewの通貨表示と同系）
+// MARK: - Fixed wallet header
 
 private struct ShopWalletHeader: View {
     let walletKcal: Int
@@ -249,10 +286,10 @@ private struct DailyShopCard: View {
     let rewardResetsToday: Int
     let maxRewardResetsPerDay: Int
 
-    // ✅ 追加：所持数を外から注入（ViewModelやStateを直接持たない）
+    // ✅ 所持数を外から注入
     let ownedCountProvider: (String) -> Int
 
-    // ✅ 仕様変更：購入タップはポップアップ経由に
+    // ✅ 購入タップはポップアップ経由
     let onBuyTap: (ShopFoodItem) -> Void
     let onRewardReset: () -> Void
 
@@ -266,7 +303,6 @@ private struct DailyShopCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            // ✅ 表示文言としての「在庫」はやめる（所持数が主役になるため）
             Text("毎日 00:00 更新 / 6品")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -279,8 +315,6 @@ private struct DailyShopCard: View {
                 VStack(spacing: 10) {
                     ForEach(items) { item in
                         HStack(spacing: 12) {
-
-                            // ✅ 仕様変更：商品名の先頭に各商品のアセット画像
                             let asset = FoodCatalog.byId(item.id)?.assetName
                             if let asset {
                                 Image(asset)
@@ -305,9 +339,6 @@ private struct DailyShopCard: View {
 
                             Spacer()
 
-                            // ✅ 仕様変更：在庫表示 → 所持数表示
-                            // - 売切/購入可否は stock で管理（従来通り）
-                            // - 表示は ownedCount（ユーザー所持数）
                             let owned = ownedCountProvider(item.id)
                             Text("所持\(owned)")
                                 .font(.caption)
@@ -329,7 +360,7 @@ private struct DailyShopCard: View {
             }
 
             HStack(spacing: 10) {
-                Button("広告でリセット（ダミー）") { onRewardReset() }
+                Button("広告でリセット") { onRewardReset() }
                     .buttonStyle(.bordered)
                     .disabled(rewardResetsToday >= maxRewardResetsPerDay)
             }

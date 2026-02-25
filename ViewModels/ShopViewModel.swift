@@ -85,6 +85,7 @@ final class ShopViewModel: ObservableObject {
         toast("\(items[idx].name) を購入しました（-\(price)kcal）")
     }
 
+    /// ✅ Reward_food（広告視聴完了後）に呼ばれる想定
     func rewardResetShopByAd(state: AppState, maxPerDay: Int) {
         handleDayRolloverIfNeeded(state: state)
         ensureDailyShopIfNeeded(state: state)
@@ -99,8 +100,10 @@ final class ShopViewModel: ObservableObject {
         state.shopItemsData = encodeShopItems(drawDailySix())
 
         Haptics.tap(style: .light)
-        toast("ショップをリセットしました（ダミー広告）")
+        toast("ショップをリセットしました")
     }
+
+    // --- 以降は既存のまま（現状の機能を壊さない） ---
 
     func buyEgg(state: AppState) {
         handleDayRolloverIfNeeded(state: state)
@@ -147,7 +150,7 @@ final class ShopViewModel: ObservableObject {
         state.eggHatchAt = Date()
 
         Haptics.tap(style: .medium)
-        toast("即孵化が可能になりました（ダミー広告）")
+        toast("即孵化が可能になりました")
     }
 
     func hatchEgg(state: AppState) {

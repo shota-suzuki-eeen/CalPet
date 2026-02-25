@@ -8,23 +8,31 @@
 import SwiftUI
 import SwiftData
 
+#if canImport(GoogleMobileAds)
+import GoogleMobileAds
+#endif
+
 @main
 struct Cal_PetApp: App {
 
     // ✅ アプリ全体でBGMを1つだけ管理
     @StateObject private var bgmManager = BGMManager()
 
+    init() {
+        // ✅ AdMob 初期化（アプリ起動時に1回だけ）
+        #if canImport(GoogleMobileAds)
+        AdMobManager.shared.start()
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
-                // ✅ 必要なら今後どのViewからでも操作できるようにしておく
                 .environmentObject(bgmManager)
-                // ✅ アプリ起動時にBGM開始（多重起動しないようBGMManager側でガード）
                 .onAppear {
                     bgmManager.startIfNeeded()
                 }
         }
-        // ✅ TodayPhotoEntry を追加
         .modelContainer(for: [AppState.self, TodayPhotoEntry.self])
     }
 }
