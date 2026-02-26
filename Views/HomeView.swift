@@ -92,9 +92,15 @@ struct HomeView: View {
         PetMaster.assetName(for: state.currentPetID)
     }
 
-    // ✅ 追加：purpor 以外はアニメ素材が無い想定なので保護
+    // ✅ 追加：purpor 以外は（ジャンプ/ホバー等の）素材が無い想定なので保護
+    // ※従来の意味を維持：tap / hungry / burp は purpor のみ
     private var canPlayCharacterAnimation: Bool {
         currentBaseAssetName == "purpor"
+    }
+
+    // ✅ 追加：まばたき対応キャラ（今回ここを拡張）
+    private var canPlayBlinkAnimation: Bool {
+        ["purpor", "kakke", "obaoru", "kepyon"].contains(currentBaseAssetName)
     }
 
     // ✅ 追加：満足度MAX判定（表示値ベースでOK）
@@ -105,6 +111,11 @@ struct HomeView: View {
     // MARK: - Layout
     fileprivate enum Layout {
         static let bannerHeight: CGFloat = 76
+
+        // ✅ 追加：iPhone固定バナー幅（GADBannerSizeBanner: 320x50 相当）
+        // ※コンテナは全幅のままにして、バナー本体だけを中央寄せで固定幅表示にする
+        static let bannerWidthIPhone: CGFloat = 320
+
         static let homeBackgroundAssetName: String = "Home_background"
 
         static let leftTopPaddingTop: CGFloat = 44
@@ -187,10 +198,12 @@ struct HomeView: View {
 
                 VStack(spacing: 0) {
 
-                    // ✅ 修正：Home上部バナーは AdMob SDK型を直接触らず、AdBannerView に一本化
-                    AdBannerView(height: Layout.bannerHeight)
+                    // ✅ 修正：Home上部バナーは iPhone幅(320)で固定表示（コンテナは全幅のまま）
+                    // - これにより「他のUIの位置」を動かさず、バナーだけ中央でiPhoneサイズになる
+                    AdBannerView(height: Layout.bannerHeight, maxBannerWidth: 320, contentHeight: 50, topOffset: 48)
+                        .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
+                        .frame(maxWidth: .infinity) // ✅ 中央寄せ（コンテナは全幅）
                         .frame(height: Layout.bannerHeight)
-                        .frame(maxWidth: .infinity)
 
                     GeometryReader { geo in
                         let characterWidth = min(geo.size.width * 0.62, Layout.characterMaxWidth)
@@ -694,8 +707,8 @@ struct HomeView: View {
                 if isFoodHoveringOverCharacter { continue }
                 if isCharacterActionRunning { continue }
 
-                // ✅ 追加：purpor以外はまばたき素材が無い想定なのでスキップ
-                if !canPlayCharacterAnimation {
+                // ✅ 修正：まばたき対応キャラのみ実行（purpor 固定をやめる）
+                if !canPlayBlinkAnimation {
                     await MainActor.run {
                         characterAssetName = currentBaseAssetName
                     }
@@ -733,7 +746,7 @@ struct HomeView: View {
         // ✅ 追加：ホバー中はジャンプさせない（表情維持）
         guard !isFoodHoveringOverCharacter else { return }
 
-        // ✅ 追加：purpor以外はジャンプ素材が無い想定なので何もしない
+        // ✅ 既存仕様：ジャンプ素材は purpor のみ
         guard canPlayCharacterAnimation else { return }
 
         Task { await playJump() }
@@ -746,23 +759,29 @@ struct HomeView: View {
         // ✅ 追加：ホバー中は差し替え優先
         guard !isFoodHoveringOverCharacter else { return }
 
-        // ✅ 追加：purpor前提
-        guard canPlayCharacterAnimation else {
+        // ✅ 修正：まばたき対応キャラのみ
+        guard canPlayBlinkAnimation else {
             await MainActor.run { characterAssetName = currentBaseAssetName }
             return
         }
 
-        await MainActor.run { characterAssetName = "purpor_idle_blink_0001" }
+        // ✅ 修正：purpor 固定をやめ、育成中キャラの prefix を使う
+        let base = currentBaseAssetName
+        let blink1 = "\(base)_idle_blink_0001"
+        let blink2 = "\(base)_idle_blink_0002"
+
+        // ✅ 仕様変更：0001 -> 0002 -> 0001
+        await MainActor.run { characterAssetName = blink1 }
         try? await Task.sleep(nanoseconds: 70_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
         if isFoodHoveringOverCharacter { return }
 
-        await MainActor.run { characterAssetName = "purpor_idle_blink_0002" }
+        await MainActor.run { characterAssetName = blink2 }
         try? await Task.sleep(nanoseconds: 60_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
         if isFoodHoveringOverCharacter { return }
 
-        await MainActor.run { characterAssetName = "purpor_idle_blink_0003" }
+        await MainActor.run { characterAssetName = blink1 }
         try? await Task.sleep(nanoseconds: 70_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
         if isFoodHoveringOverCharacter { return }
@@ -777,7 +796,7 @@ struct HomeView: View {
         // ✅ 追加：ホバー中は差し替え優先
         guard !isFoodHoveringOverCharacter else { return }
 
-        // ✅ 追加：purpor前提
+        // ✅ 既存仕様：purpor前提
         guard canPlayCharacterAnimation else {
             await MainActor.run { characterAssetName = currentBaseAssetName }
             return

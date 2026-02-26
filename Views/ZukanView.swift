@@ -19,6 +19,9 @@ struct ZukanView: View {
 
     @State private var selectedPetID: String? = nil
 
+    // ✅ 追加：インタースティシャル（キャラ切替用）
+    @ObservedObject private var interstitial = AdMobManager.shared.interstitialCharacterSet
+
     var body: some View {
         ZStack {
             // ✅ 背景画像を見せたいので、ベタ塗りをやめる（レイアウトは変わらない）
@@ -42,9 +45,8 @@ struct ZukanView: View {
                         state: state,
                         selectedPetID: selectedPetID ?? state.currentPetID,
                         onTrain: { id in
-                            state.currentPetID = id
-                            selectedPetID = id
-                            save()
+                            // ✅ 仕様：押したら interstitial → 見終わったら切替
+                            handleTrainTapped(state: state, id: id)
                         }
                     )
                     .padding(.top, 6)
@@ -77,6 +79,30 @@ struct ZukanView: View {
             if selectedPetID == nil {
                 selectedPetID = state.currentPetID
             }
+
+            // ✅ 追加：初回から出せるように事前ロード
+            interstitial.load()
+        }
+    }
+
+    // ✅ 追加：ボタン押下ハンドラ（広告→切替）
+    private func handleTrainTapped(state: AppState, id: String) {
+        let switchPet: () -> Void = {
+            state.currentPetID = id
+            selectedPetID = id
+            save()
+        }
+
+        // ✅ 広告が用意できていれば表示 → 見終わったら切替
+        if interstitial.isReady {
+            interstitial.show {
+                switchPet()
+            }
+        } else {
+            // ✅ フォールバック：まだ広告が無いならそのまま切替（UX優先）
+            switchPet()
+            // 次回のためにロードしておく
+            interstitial.load()
         }
     }
 
