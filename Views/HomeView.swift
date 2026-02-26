@@ -100,7 +100,9 @@ struct HomeView: View {
 
     // ✅ 追加：まばたき対応キャラ（今回ここを拡張）
     private var canPlayBlinkAnimation: Bool {
-        ["purpor", "kakke", "obaoru", "kepyon"].contains(currentBaseAssetName)
+        [
+            "purpor", "kakke", "obaoru", "kepyon","sun", "wanigeeta", "beat", "ninjin", "biniki", "himei", "wareware"
+        ].contains(currentBaseAssetName)
     }
 
     // ✅ 追加：満足度MAX判定（表示値ベースでOK）

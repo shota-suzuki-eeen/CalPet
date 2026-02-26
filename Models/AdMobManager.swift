@@ -92,11 +92,35 @@ final class AdMobManager: ObservableObject {
 // MARK: - Root VC helper
 
 private extension UIApplication {
+
+    /// 互換用（既存コードが使っている場合に備えて残す）
     static func activeRootViewController() -> UIViewController? {
         let scenes = UIApplication.shared.connectedScenes
         let windowScene = scenes.first { $0.activationState == .foregroundActive } as? UIWindowScene
         let window = windowScene?.windows.first { $0.isKeyWindow }
         return window?.rootViewController
+    }
+
+    /// ✅ FocusQuest 側と同じ思想：最前面のVCを取る（広告の表示/ロードが安定する）
+    func topMostViewController(base: UIViewController? = nil) -> UIViewController? {
+        let baseVC: UIViewController? = {
+            if let base { return base }
+            let scenes = connectedScenes
+            let windowScene = scenes.first { $0.activationState == .foregroundActive } as? UIWindowScene
+            let window = windowScene?.windows.first { $0.isKeyWindow }
+            return window?.rootViewController
+        }()
+
+        if let nav = baseVC as? UINavigationController {
+            return topMostViewController(base: nav.visibleViewController)
+        }
+        if let tab = baseVC as? UITabBarController {
+            return topMostViewController(base: tab.selectedViewController)
+        }
+        if let presented = baseVC?.presentedViewController {
+            return topMostViewController(base: presented)
+        }
+        return baseVC
     }
 }
 
@@ -104,47 +128,41 @@ private extension UIApplication {
 
 struct AdMobBannerView: UIViewRepresentable {
     let adUnitID: String
-    let width: CGFloat
+    let width: CGFloat   // ✅ 既存との互換のため残す（固定運用なので基本未使用）
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> BannerView {
-        let banner = BannerView(adSize: currentOrientationAnchoredAdaptiveBanner(width: width))
+        // ✅ FocusQuest と同じ：iPhone想定で 320×50 固定
+        let banner = BannerView(adSize: AdSizeBanner)
         banner.adUnitID = adUnitID
-        banner.rootViewController = UIApplication.activeRootViewController()
+
+        // ✅ topMost VC を使う（rootVCより安定）
+        banner.rootViewController = UIApplication.shared.topMostViewController()
+
+        // ✅ 背景は透明
+        banner.backgroundColor = .clear
 
         banner.load(Request())
 
         context.coordinator.lastLoadedAdUnitID = adUnitID
-        context.coordinator.lastLoadedWidth = width
         return banner
     }
 
     func updateUIView(_ uiView: BannerView, context: Context) {
-        uiView.rootViewController = UIApplication.activeRootViewController()
+        uiView.rootViewController = UIApplication.shared.topMostViewController()
+        uiView.backgroundColor = .clear
 
-        let newSize = currentOrientationAnchoredAdaptiveBanner(width: width)
-        if uiView.adSize.size.width != newSize.size.width ||
-           uiView.adSize.size.height != newSize.size.height {
-            uiView.adSize = newSize
-        }
-
-        // ✅ adUnit / width が変わったときだけ再ロード
-        let shouldReload =
-            context.coordinator.lastLoadedAdUnitID != adUnitID ||
-            abs((context.coordinator.lastLoadedWidth ?? 0) - width) > 0.5
-
-        if shouldReload {
+        // ✅ adUnit が変わったときだけ再ロード（width変動では再ロードしない）
+        if context.coordinator.lastLoadedAdUnitID != adUnitID {
             uiView.adUnitID = adUnitID
             uiView.load(Request())
             context.coordinator.lastLoadedAdUnitID = adUnitID
-            context.coordinator.lastLoadedWidth = width
         }
     }
 
     final class Coordinator {
         var lastLoadedAdUnitID: String?
-        var lastLoadedWidth: CGFloat?
     }
 }
 
@@ -161,7 +179,10 @@ struct BannerArea: View {
     var body: some View {
         GeometryReader { proxy in
             let rawW = max(1, proxy.size.width)
-            let w = maxWidth.map { min(rawW, $0) } ?? rawW
+
+            // ✅ 互換のため残す（固定運用なので最終的に width は効きづらいが、既存設計は壊さない）
+            let w = normalizeBannerWidth(rawW)
+
             let adH = min(max(1, contentHeight), height)
 
             ZStack {
@@ -170,13 +191,27 @@ struct BannerArea: View {
                 AdMobBannerView(adUnitID: adUnitID, width: w)
                     .frame(width: w, height: adH)
                     .clipped()
-                    // ✅ ここで “下に下げる”
                     .padding(.top, topOffset)
-                    // ✅ 上寄せのまま（paddingで下げる）
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
         .frame(height: height)
+    }
+
+    /// ✅ banner要求に使う width を「ポイント幅」に正規化する（互換用）
+    private func normalizeBannerWidth(_ rawW: CGFloat) -> CGFloat {
+        let screenW = UIScreen.main.bounds.width
+        let scale = UIScreen.main.scale
+
+        var w = maxWidth.map { min(rawW, $0) } ?? rawW
+        w = min(w, screenW)
+
+        if w > screenW * 1.15 {
+            w = w / scale
+            w = min(w, screenW)
+        }
+
+        return max(1, w)
     }
 }
 
@@ -219,7 +254,9 @@ final class RewardedAdManager: ObservableObject {
             isReady = false
             return
         }
-        guard let root = UIApplication.activeRootViewController() else {
+
+        // ✅ topMost VC を使う（rootVCより安定）
+        guard let root = UIApplication.shared.topMostViewController() else {
             isReady = false
             return
         }
@@ -235,7 +272,7 @@ final class RewardedAdManager: ObservableObject {
     }
 }
 
-// MARK: - Interstitial (✅ 追加)
+// MARK: - Interstitial
 
 @MainActor
 final class InterstitialAdManager: NSObject, ObservableObject {
@@ -273,14 +310,15 @@ final class InterstitialAdManager: NSObject, ObservableObject {
         }
     }
 
-    /// - Parameter onDismiss: 広告が閉じられたタイミングで実行（＝「見終わったらキャラ切替」をここに乗せる）
+    /// - Parameter onDismiss: 広告が閉じられたタイミングで実行
     func show(onDismiss: @escaping () -> Void) {
         guard let ad = interstitialAd else {
             isReady = false
-            // ここで「広告が無い」場合でも進めたいなら、呼び出し側で isReady を見て分岐する想定
             return
         }
-        guard let root = UIApplication.activeRootViewController() else {
+
+        // ✅ topMost VC を使う（rootVCより安定）
+        guard let root = UIApplication.shared.topMostViewController() else {
             isReady = false
             return
         }
@@ -300,19 +338,16 @@ final class InterstitialAdManager: NSObject, ObservableObject {
 
 extension InterstitialAdManager: FullScreenContentDelegate {
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
-        // ✅ 見終わった（閉じられた）→ ここでキャラ切替などを実行
         let callback = onDismiss
         onDismiss = nil
         callback?()
 
-        // ✅ 次回のために再ロード
         load()
     }
 
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
         lastErrorMessage = error.localizedDescription
 
-        // 出せなかった場合でも UI が固まらないように、必要なら進める
         let callback = onDismiss
         onDismiss = nil
         callback?()
