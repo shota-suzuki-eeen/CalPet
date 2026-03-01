@@ -92,10 +92,38 @@ struct HomeView: View {
         PetMaster.assetName(for: state.currentPetID)
     }
 
-    // ✅ 追加：purpor 以外は（ジャンプ/ホバー等の）素材が無い想定なので保護
-    // ※従来の意味を維持：tap / hungry / burp は purpor のみ
+    // ✅ 追加：ごはんホバー時の表情差し替え（*_hungry / *_burp）に対応しているキャラ
     private var canPlayCharacterAnimation: Bool {
-        currentBaseAssetName == "purpor"
+        [
+            "purpor",
+            "obaoru",
+            "ninjin",
+            "kakke",
+            "beat",
+            "biniki",
+            "himei",
+            "kepyon",
+            "sun",
+            "wanigeeta",
+            "wareware"
+        ].contains(currentBaseAssetName)
+    }
+
+    // ✅ 追加：タップアクション対応キャラ（今回追加アセットに対応）
+    private var canPlayTapAnimation: Bool {
+        [
+            "purpor",
+            "obaoru",
+            "kakke",
+            "kepyon",
+            "sun",
+            "ninjin",
+            "beat",
+            "biniki",
+            "himei",
+            "wanigeeta",
+            "wareware"
+        ].contains(currentBaseAssetName)
     }
 
     // ✅ 追加：まばたき対応キャラ（今回ここを拡張）
@@ -637,11 +665,11 @@ struct HomeView: View {
         characterAssetName = currentBaseAssetName
     }
 
-    // MARK: - ✅ Food Hover（purpor_hungry / purpor_burp）
+    // MARK: - ✅ Food Hover（*_hungry / *_burp）
     private func beginFoodHover() {
         isFoodHoveringOverCharacter = true
 
-        // purpor 以外は hover差し替え素材が無い想定なので、ベースのまま
+        // hover差し替え素材が無いキャラはベースのまま
         guard canPlayCharacterAnimation else {
             characterAssetName = currentBaseAssetName
             return
@@ -650,7 +678,8 @@ struct HomeView: View {
         // アクション中は割り込みたくない（ただしホバー優先にしたい場合はここを外せる）
         guard !isCharacterActionRunning else { return }
 
-        characterAssetName = isSatisfactionMax ? "purpor_burp" : "purpor_hungry"
+        let base = currentBaseAssetName
+        characterAssetName = isSatisfactionMax ? "\(base)_burp" : "\(base)_hungry"
     }
 
     private func endFoodHoverIfNeeded() {
@@ -748,8 +777,8 @@ struct HomeView: View {
         // ✅ 追加：ホバー中はジャンプさせない（表情維持）
         guard !isFoodHoveringOverCharacter else { return }
 
-        // ✅ 既存仕様：ジャンプ素材は purpor のみ
-        guard canPlayCharacterAnimation else { return }
+        // ✅ 修正：タップアクションは対応キャラのみ（今回追加分を含む）
+        guard canPlayTapAnimation else { return }
 
         Task { await playJump() }
     }
@@ -798,22 +827,28 @@ struct HomeView: View {
         // ✅ 追加：ホバー中は差し替え優先
         guard !isFoodHoveringOverCharacter else { return }
 
-        // ✅ 既存仕様：purpor前提
-        guard canPlayCharacterAnimation else {
+        // ✅ 修正：タップアクションは対応キャラのみ
+        guard canPlayTapAnimation else {
             await MainActor.run { characterAssetName = currentBaseAssetName }
             return
         }
 
+        let base = currentBaseAssetName
+        let tap1 = "\(base)_tap_0001"
+        let tap2 = "\(base)_tap_0002"
+
         await MainActor.run {
             isCharacterActionRunning = true
-            characterAssetName = "purpor_tap_0001"
+            characterAssetName = tap1
         }
         try? await Task.sleep(nanoseconds: 80_000_000)
 
-        await MainActor.run { characterAssetName = "purpor_tap_0002" }
+        // ✅ *_tap_0002 は「ちょっと長めに表示」
+        await MainActor.run { characterAssetName = tap2 }
         try? await Task.sleep(nanoseconds: 200_000_000)
 
-        await MainActor.run { characterAssetName = "purpor_tap_0003" }
+        // ✅ 仕様変更：*_tap_0001 -> *_tap_0002 -> *_tap_0001（*_tap_0003 は使わない）
+        await MainActor.run { characterAssetName = tap1 }
         try? await Task.sleep(nanoseconds: 90_000_000)
 
         await MainActor.run {
