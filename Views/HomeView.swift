@@ -451,13 +451,6 @@ struct HomeView: View {
                                     }
                                     showCaptureModeDialog = true
                                 },
-                                onCommandRush: {
-                                    if isToiletLocked {
-                                        showToiletLockedMessage()
-                                        return
-                                    }
-                                    showCommandRush = true
-                                },
                                 isToiletLocked: isToiletLocked,
                                 onBlocked: { showToiletLockedMessage() },
                                 buttonSize: Layout.rightButtonSize,
@@ -523,7 +516,7 @@ struct HomeView: View {
                                             showToiletLockedMessage()
                                             return
                                         }
-                                        /* 何もしない */
+                                        showCommandRush = true
                                     },
                                     isSleepAvailable: canSleep,
                                     isBathAvailable: canBath,
@@ -1857,7 +1850,6 @@ private struct KcalRing: View {
 private struct RightSideButtons: View {
     let state: AppState
     let onCamera: () -> Void
-    let onCommandRush: () -> Void
 
     // ✅ 追加：トイレ中ロック
     let isToiletLocked: Bool
@@ -1874,20 +1866,6 @@ private struct RightSideButtons: View {
                     .scaledToFit()
                     .frame(width: buttonSize, height: buttonSize)
             }
-
-            Button(action: onCommandRush) {
-                ZStack {
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                    Image(systemName: "bolt.circle.fill")
-                        .resizable()
-                        .scaledToFit()
-                        .padding(buttonSize * 0.16)
-                        .foregroundStyle(.yellow)
-                }
-                .frame(width: buttonSize, height: buttonSize)
-            }
-            .buttonStyle(.plain)
 
             if isToiletLocked {
                 Button(action: onBlocked) {
