@@ -35,6 +35,7 @@ final class AppState {
     var friendshipCardCount: Int
 
     // MARK: - ✅ Satisfaction (Feed Spec: NEW)
+    // ✅ 重要：初期値が 3 だと満足度MAXで永遠にご飯できないので 0 にする
     var satisfactionLevel: Int
     var satisfactionLastUpdatedAt: Date?
 
@@ -68,6 +69,11 @@ final class AppState {
     // ✅ ご飯インベントリ
     var ownedFoodCountsData: Data?
 
+    // MARK: - ✅ Super Favorite Reveal (NEW)
+    // ⚠️ SwiftDataのマイグレーション安定のため「宣言側」にデフォルトを置く
+    // petID -> Bool（大好物が判明しているか）
+    var superFavoriteRevealedData: Data? = nil
+
     // MARK: - ✅ Moja (NEW)
     // ⚠️ 重要：SwiftDataのマイグレーション安定のため「宣言側」にデフォルトを置く
     // （init の default だけだと既存ストアからの移行で値が入らず、AppStateが読めない原因になりやすい）
@@ -88,7 +94,8 @@ final class AppState {
         friendshipPoint: Int = 0,
         friendshipCardCount: Int = 0,
 
-        satisfactionLevel: Int = 3,
+        // ✅ 修正：初期満足度は 0（MAX=3）
+        satisfactionLevel: Int = 0,
         satisfactionLastUpdatedAt: Date? = nil,
 
         bathLastAt: Date? = nil,
@@ -113,6 +120,9 @@ final class AppState {
         notifyToilet: Bool = true,
 
         ownedFoodCountsData: Data? = nil,
+
+        // ✅ Super Favorite Reveal (NEW)
+        superFavoriteRevealedData: Data? = nil,
 
         // ✅ Moja (NEW) ※呼び出し側が指定したい場合のため引数は残す
         mojaCount: Int = 0,
@@ -158,6 +168,9 @@ final class AppState {
         self.notifyToilet = notifyToilet
 
         self.ownedFoodCountsData = ownedFoodCountsData
+
+        // ✅ Super Favorite Reveal (NEW)
+        self.superFavoriteRevealedData = superFavoriteRevealedData
 
         // ✅ Moja (NEW)
         self.mojaCount = mojaCount
@@ -245,6 +258,41 @@ extension AppState {
     }
 }
 
+// MARK: - ✅ Super Favorite Reveal helpers (NEW)
+extension AppState {
+    private func superFavoriteRevealedMap() -> [String: Bool] {
+        guard let data = superFavoriteRevealedData,
+              let dict = try? JSONDecoder().decode([String: Bool].self, from: data) else {
+            return [:]
+        }
+        return dict
+    }
+
+    private func setSuperFavoriteRevealedMap(_ dict: [String: Bool]) {
+        superFavoriteRevealedData = try? JSONEncoder().encode(dict)
+    }
+
+    /// ✅ 大好物が判明しているか
+    func isSuperFavoriteRevealed(petID: String) -> Bool {
+        let dict = superFavoriteRevealedMap()
+        return dict[petID] ?? false
+    }
+
+    /// ✅ 大好物を判明済みにする（すでにtrueなら何もしない）
+    @discardableResult
+    func revealSuperFavorite(petID: String) -> Bool {
+        // 図鑑対象外のIDを誤って入れない保険（必要なければ外してOK）
+        if !isValidZukanPetID(petID) { return false }
+
+        var dict = superFavoriteRevealedMap()
+        if dict[petID] == true { return false }
+
+        dict[petID] = true
+        setSuperFavoriteRevealedMap(dict)
+        return true
+    }
+}
+
 // MARK: - Day Reset (Care Spec)
 extension AppState {
     func ensureDailyResetIfNeeded(now: Date = Date()) {
@@ -260,6 +308,7 @@ extension AppState {
         }
 
         // ✅ Moja：リアル時間進行のため日跨ぎでリセットしない
+        // ✅ 大好物判明：永続のため日跨ぎでリセットしない
 
         lastDayKey = todayKey
     }

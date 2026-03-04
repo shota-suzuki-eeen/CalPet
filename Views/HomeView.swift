@@ -32,7 +32,7 @@ struct HomeView: View {
     @State private var displayedWalletKcal: Int = 0
 
     // ✅ 満足度（表示用：0..3）
-    @State private var displayedSatisfaction: Int = 3
+    @State private var displayedSatisfaction: Int = 0
 
     // 目標入力（初回必須）
     @State private var showGoalSheet: Bool = false
@@ -129,7 +129,17 @@ struct HomeView: View {
     // ✅ 追加：まばたき対応キャラ（今回ここを拡張）
     private var canPlayBlinkAnimation: Bool {
         [
-            "purpor", "kakke", "obaoru", "kepyon","sun", "wanigeeta", "beat", "ninjin", "biniki", "himei", "wareware"
+            "purpor",
+            "kakke",
+            "obaoru",
+            "kepyon",
+            "sun",
+            "wanigeeta",
+            "beat",
+            "ninjin",
+            "biniki",
+            "himei",
+            "wareware"
         ].contains(currentBaseAssetName)
     }
 
@@ -897,13 +907,84 @@ struct HomeView: View {
             return false
         }
 
+        // ✅ NEW: 大好物判定（foodId ベースで判定）
+        let isSuperFavorite = isSuperFavoriteFood(foodId: food.id, petID: state.currentPetID)
+
+        // ✅ NEW: 獲得なかよしポイント（大好物なら2倍）
+        let basePoint = 10
+        let gainedPoint = isSuperFavorite ? (basePoint * 2) : basePoint
+
+        // ✅ NEW: 大好物が判明したら図鑑の「？？？」を解放
+        if isSuperFavorite {
+            state.revealSuperFavorite(petID: state.currentPetID)
+        }
+
         save()
 
         displayedSatisfaction = fed.after
-        addFriendshipWithAnimation(points: 10, state: state)
-        toast("\(food.name)をあげた！ +10")
+        addFriendshipWithAnimation(points: gainedPoint, state: state)
+
+        if isSuperFavorite {
+            toast("\(food.name)をあげた！ 大好物だ！ +\(gainedPoint)")
+            playSuperFavoriteReactionIfPossible()
+        } else {
+            toast("\(food.name)をあげた！ +\(gainedPoint)")
+        }
 
         return true
+    }
+    
+    // MARK: - ✅ Super Favorite (NEW)
+
+    // ✅ 仕様：キャラごとの大好物（FoodCatalog.FoodItem.id と一致させる）
+    private func isSuperFavoriteFood(foodId: String, petID: String) -> Bool {
+        switch petID {
+        case "pet_001": return foodId == "ra-men"       // beat
+        case "pet_002": return foodId == "icecream"    // biniki
+        case "pet_003": return foodId == "barger"      // himei
+        case "pet_004": return foodId == "coke"        // kakke
+        case "pet_005": return foodId == "yo-guruto"   // kepyon
+        case "pet_006": return foodId == "sarad"       // ninjin
+        case "pet_007": return foodId == "coffee"      // obaoru
+        case "pet_000": return foodId == "onigiri"     // purpor
+        case "pet_008": return foodId == "nabe"        // sun
+        case "pet_009": return foodId == "sute-ki"     // wanigeeta
+        case "pet_010": return foodId == "pizza"       // wareware
+        default:
+            return false
+        }
+    }
+
+    // ✅ 大好物だった時の演出（*_love を短時間表示）
+    private func playSuperFavoriteReactionIfPossible() {
+        // ホバー中は表情維持したいので、まずホバー解除
+        endFoodHoverIfNeeded()
+
+        // loveアセットがある前提（例: beat_love）
+        let base = currentBaseAssetName
+        let love = "\(base)_love"
+
+        // 既存アクションと競合しないように短時間ロック
+        guard !isCharacterActionRunning else { return }
+
+        Task { @MainActor in
+            isCharacterActionRunning = true
+            characterAssetName = love
+        }
+
+        Task {
+            try? await Task.sleep(nanoseconds: 900_000_000) // 0.9s表示
+
+            await MainActor.run {
+                // ここでホバーしているならホバー表情へ、そうでなければベースへ
+                if isFoodHoveringOverCharacter {
+                    beginFoodHover()
+                } else {
+                    characterAssetName = currentBaseAssetName
+                }
+                isCharacterActionRunning = false
+            }
+        }
     }
 
     // MARK: - UI helpers

@@ -216,12 +216,24 @@ private struct ZukanDetailPanel: View {
         PetMaster.assetName(for: selectedPetID)
     }
 
-    private var selectedDescription: String {
-        PetMaster.description(for: selectedPetID)
-    }
-
     private var isCurrent: Bool {
         state.currentPetID == selectedPetID
+    }
+
+    // ✅ NEW: 大好物（表示用）
+    private var superFavoriteDisplayText: String {
+        state.isSuperFavoriteRevealed(petID: selectedPetID)
+        ? PetMaster.superFavoriteFoodName(for: selectedPetID)
+        : "？？？"
+    }
+
+    // ✅ 説明文：PetMaster側のテキストから「【大好物】」行を除いた本文だけを表示する
+    // （表示はこのViewで必ず別途出す＝kakkeだけ消える等の事故を防ぐ）
+    private var descriptionBodyText: String {
+        let full = PetMaster.description(for: selectedPetID, state: state)
+        // PetMasterは "\n\n【大好物】" を付与している前提
+        let parts = full.components(separatedBy: "\n\n【大好物】")
+        return parts.first ?? full
     }
 
     var body: some View {
@@ -253,9 +265,16 @@ private struct ZukanDetailPanel: View {
                     Text(selectedName)
                         .font(.headline)
 
-                    Text(selectedDescription)
+                    // ✅ 本文
+                    Text(descriptionBodyText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // ✅ 大好物：常にここで表示する（kakkeだけ消える等を回避）
+                    Text("【大好物】\(superFavoriteDisplayText)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     Spacer(minLength: 0)
