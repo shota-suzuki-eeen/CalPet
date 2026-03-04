@@ -87,9 +87,45 @@ struct HomeView: View {
     private let doubleBlinkChance: Double = 0.18
     private let doubleBlinkGapRange: ClosedRange<Double> = 0.18...0.45
 
+    // =========================================================
+    // ✅ トイレフラグ中の操作ロック & ポップアップ
+    // =========================================================
+    @State private var showToiletLockedPopup: Bool = false
+    @State private var toiletLockedPopupText: String = ""
+
+    // ✅ トイレ中モジモジ（左右揺れ）
+    @State private var isToiletWiggleOn: Bool = false
+
     // ✅ 追加：現在育成中キャラの「ベースアセット名」
     private var currentBaseAssetName: String {
         PetMaster.assetName(for: state.currentPetID)
+    }
+
+    // ✅ 追加：表示用キャラ名
+    private var currentPetName: String {
+        PetMaster.all.first(where: { $0.id == state.currentPetID })?.name ?? "ペット"
+    }
+
+    // ✅ 追加：トイレロック中か
+    private var isToiletLocked: Bool {
+        state.toiletFlagAt != nil
+    }
+
+    // ✅ 追加：トイレ中に表示する *_wc が用意されているキャラ
+    private var canShowWcAsset: Bool {
+        [
+            "beat",
+            "biniki",
+            "himei",
+            "kakke",
+            "kepyon",
+            "ninjin",
+            "obaoru",
+            "purpor",
+            "sun",
+            "wanigeeta",
+            "wareware"
+        ].contains(currentBaseAssetName)
     }
 
     // ✅ 追加：ごはんホバー時の表情差し替え（*_hungry / *_burp）に対応しているキャラ
@@ -226,6 +262,16 @@ struct HomeView: View {
         static let zCharacter: Double = 50
         static let zFoodShelf: Double = 220
         static let zReward: Double = 300
+
+        // ✅ トイレモジモジ
+        static let toiletWiggleOffset: CGFloat = 3
+        static let toiletWiggleDuration: Double = 0.12
+
+        // ✅ 中央ポップアップ
+        static let lockedPopupMaxWidth: CGFloat = 320
+        static let lockedPopupPaddingH: CGFloat = 18
+        static let lockedPopupPaddingV: CGFloat = 12
+        static let lockedPopupShowSeconds: Double = 1.1
     }
 
     var body: some View {
@@ -265,7 +311,14 @@ struct HomeView: View {
                                     .offset(y: Layout.characterTopOffset)
                                     .zIndex(Layout.zCharacter)
                                     .highPriorityGesture(
-                                        TapGesture().onEnded { triggerCharacterJump() }
+                                        TapGesture().onEnded {
+                                            // ✅ トイレ中はタップ禁止（WCボタンのみ許可）
+                                            if isToiletLocked {
+                                                showToiletLockedMessage()
+                                            } else {
+                                                triggerCharacterJump()
+                                            }
+                                        }
                                     )
                                     // ✅ 追加：棚が開いている時は、キャラ周辺をタップしても閉じる（ドロップは妨げない）
                                     .simultaneousGesture(
@@ -277,6 +330,12 @@ struct HomeView: View {
                                         of: [UTType.plainText.identifier, UTType.text.identifier],
                                         isTargeted: $isDropTargeted
                                     ) { providers in
+                                        // ✅ トイレ中は給餌も禁止
+                                        if isToiletLocked {
+                                            showToiletLockedMessage()
+                                            return false
+                                        }
+
                                         guard let provider = providers.first else { return false }
 
                                         provider.loadItem(
@@ -306,7 +365,16 @@ struct HomeView: View {
                                     .resizable()
                                     .scaledToFit()
                                     .frame(maxWidth: characterWidth)
-                                    .offset(y: Layout.characterTopOffset)
+                                    .offset(
+                                        x: isToiletLocked ? (isToiletWiggleOn ? Layout.toiletWiggleOffset : -Layout.toiletWiggleOffset) : 0,
+                                        y: Layout.characterTopOffset
+                                    )
+                                    .animation(
+                                        isToiletLocked
+                                        ? .easeInOut(duration: Layout.toiletWiggleDuration).repeatForever(autoreverses: true)
+                                        : .default,
+                                        value: isToiletWiggleOn
+                                    )
                                     .allowsHitTesting(false)
                             }
 
@@ -375,7 +443,15 @@ struct HomeView: View {
                             // 4) 右側：縦ボタン
                             RightSideButtons(
                                 state: state,
-                                onCamera: { showCaptureModeDialog = true },
+                                onCamera: {
+                                    if isToiletLocked {
+                                        showToiletLockedMessage()
+                                        return
+                                    }
+                                    showCaptureModeDialog = true
+                                },
+                                isToiletLocked: isToiletLocked,
+                                onBlocked: { showToiletLockedMessage() },
                                 buttonSize: Layout.rightButtonSize,
                                 spacing: Layout.rightButtonsSpacing
                             )
@@ -409,11 +485,38 @@ struct HomeView: View {
                                 let canSleep = true
 
                                 BottomButtons(
-                                    onSleep: { addFriendshipWithAnimation(points: 5, state: state) },
-                                    onBath: { onTapBath(state: state) },
-                                    onFood: { onTapFood(state: state) },
-                                    onWc: { onTapToilet(state: state) },
-                                    onHome: { /* 何もしない */ },
+                                    onSleep: {
+                                        if isToiletLocked {
+                                            showToiletLockedMessage()
+                                            return
+                                        }
+                                        addFriendshipWithAnimation(points: 5, state: state)
+                                    },
+                                    onBath: {
+                                        if isToiletLocked {
+                                            showToiletLockedMessage()
+                                            return
+                                        }
+                                        onTapBath(state: state)
+                                    },
+                                    onFood: {
+                                        if isToiletLocked {
+                                            showToiletLockedMessage()
+                                            return
+                                        }
+                                        onTapFood(state: state)
+                                    },
+                                    onWc: {
+                                        // ✅ トイレ中でも押せる（ここでフラグが消えたら通常に戻る）
+                                        onTapToilet(state: state)
+                                    },
+                                    onHome: {
+                                        if isToiletLocked {
+                                            showToiletLockedMessage()
+                                            return
+                                        }
+                                        /* 何もしない */
+                                    },
                                     isSleepAvailable: canSleep,
                                     isBathAvailable: canBath,
                                     isFoodAvailable: canFood,
@@ -487,6 +590,21 @@ struct HomeView: View {
                                 .transition(.opacity)
                                 .zIndex(Layout.zReward)
                             }
+
+                            // ✅ 追加：トイレ中ブロックポップアップ（画面中央）
+                            if showToiletLockedPopup {
+                                Text(toiletLockedPopupText)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(.primary)
+                                    .padding(.horizontal, Layout.lockedPopupPaddingH)
+                                    .padding(.vertical, Layout.lockedPopupPaddingV)
+                                    .background(.thinMaterial)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .shadow(radius: 10)
+                                    .frame(maxWidth: Layout.lockedPopupMaxWidth)
+                                    .transition(.opacity.combined(with: .scale))
+                                    .zIndex(999)
+                            }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay(alignment: .bottom) {
@@ -553,6 +671,9 @@ struct HomeView: View {
             if !didSetDailyGoalOnce, state.dailyGoalKcal <= 0 {
                 showGoalSheet = true
             }
+
+            // ✅ トイレモジモジ開始/停止
+            updateToiletWiggle()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             state.ensureInitialPetsIfNeeded()
@@ -578,6 +699,9 @@ struct HomeView: View {
                 if isHomeVisible {
                     await reconcileWalletDisplayIfNeeded(state: state)
                 }
+
+                // ✅ トイレモジモジ更新
+                updateToiletWiggle()
             }
         }
         .sheet(isPresented: $showGoalSheet) {
@@ -616,6 +740,9 @@ struct HomeView: View {
             displayedSatisfaction = state.currentSatisfaction(now: Date())
 
             Task { await reconcileWalletDisplayIfNeeded(state: state) }
+
+            // ✅ トイレモジモジ更新
+            updateToiletWiggle()
         }
         .onDisappear {
             isHomeVisible = false
@@ -656,6 +783,42 @@ struct HomeView: View {
             guard isFoodHoveringOverCharacter else { return }
             beginFoodHover()
         }
+        // ✅ 追加：トイレフラグ変化で、表示キャラを即更新（*_wc / 通常）
+        .onChange(of: state.toiletFlagAt) { _, _ in
+            syncCharacterBaseFromState(force: true)
+            updateToiletWiggle()
+        }
+    }
+
+    // MARK: - ✅ トイレ中ブロック表示
+    private func showToiletLockedMessage() {
+        toiletLockedPopupText = "\(currentPetName)は今それどころじゃない！"
+        withAnimation(.easeOut(duration: 0.12)) {
+            showToiletLockedPopup = true
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Layout.lockedPopupShowSeconds) {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showToiletLockedPopup = false
+            }
+        }
+
+        Task { @MainActor in
+            Haptics.rattle(duration: 0.10, style: .light)
+        }
+    }
+
+    // MARK: - ✅ トイレモジモジ開始/停止
+    private func updateToiletWiggle() {
+        if isToiletLocked {
+            // repeatForever のトリガに使う
+            isToiletWiggleOn = false
+            DispatchQueue.main.async {
+                isToiletWiggleOn = true
+            }
+        } else {
+            isToiletWiggleOn = false
+        }
     }
 
     // MARK: - ✅ currentPetID → 表示キャラ反映
@@ -663,6 +826,12 @@ struct HomeView: View {
         // アクション中は差し替えるとチラつくので、強制時以外は避ける
         if !force {
             guard !isCharacterActionRunning else { return }
+        }
+
+        // ✅ トイレ中は *_wc を最優先（ホバーや通常表情より優先）
+        if isToiletLocked, canShowWcAsset {
+            characterAssetName = "\(currentBaseAssetName)_wc"
+            return
         }
 
         // ホバー中は “ホバー用アセット” が優先
@@ -677,6 +846,13 @@ struct HomeView: View {
 
     // MARK: - ✅ Food Hover（*_hungry / *_burp）
     private func beginFoodHover() {
+        // ✅ トイレ中はホバー表情を出さない（*_wc 優先）
+        guard !isToiletLocked else {
+            isFoodHoveringOverCharacter = false
+            syncCharacterBaseFromState(force: true)
+            return
+        }
+
         isFoodHoveringOverCharacter = true
 
         // hover差し替え素材が無いキャラはベースのまま
@@ -729,6 +905,12 @@ struct HomeView: View {
                     continue
                 }
 
+                // ✅ トイレ中はアイドル割り込みを止める（*_wc を維持）
+                if isToiletLocked {
+                    try? await Task.sleep(nanoseconds: 120_000_000)
+                    continue
+                }
+
                 // ✅ 追加：ホバー中は差し替えを維持したいので、アイドル割り込みを止める
                 if isFoodHoveringOverCharacter {
                     try? await Task.sleep(nanoseconds: 120_000_000)
@@ -745,6 +927,7 @@ struct HomeView: View {
 
                 if Task.isCancelled { break }
                 if !isHomeVisible { continue }
+                if isToiletLocked { continue }
                 if isFoodHoveringOverCharacter { continue }
                 if isCharacterActionRunning { continue }
 
@@ -766,6 +949,7 @@ struct HomeView: View {
 
                     if Task.isCancelled { break }
                     if !isHomeVisible { continue }
+                    if isToiletLocked { continue }
                     if isFoodHoveringOverCharacter { continue }
                     if isCharacterActionRunning { continue }
 
@@ -784,6 +968,9 @@ struct HomeView: View {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
 
+        // ✅ トイレ中はジャンプ禁止
+        guard !isToiletLocked else { return }
+
         // ✅ 追加：ホバー中はジャンプさせない（表情維持）
         guard !isFoodHoveringOverCharacter else { return }
 
@@ -796,6 +983,9 @@ struct HomeView: View {
     private func playBlink() async {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
+
+        // ✅ トイレ中はまばたきしない
+        guard !isToiletLocked else { return }
 
         // ✅ 追加：ホバー中は差し替え優先
         guard !isFoodHoveringOverCharacter else { return }
@@ -815,16 +1005,19 @@ struct HomeView: View {
         await MainActor.run { characterAssetName = blink1 }
         try? await Task.sleep(nanoseconds: 70_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
+        if isToiletLocked { return }
         if isFoodHoveringOverCharacter { return }
 
         await MainActor.run { characterAssetName = blink2 }
         try? await Task.sleep(nanoseconds: 60_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
+        if isToiletLocked { return }
         if isFoodHoveringOverCharacter { return }
 
         await MainActor.run { characterAssetName = blink1 }
         try? await Task.sleep(nanoseconds: 70_000_000)
         if isCharacterActionRunning || !isHomeVisible { return }
+        if isToiletLocked { return }
         if isFoodHoveringOverCharacter { return }
 
         await MainActor.run { characterAssetName = currentBaseAssetName }
@@ -833,6 +1026,9 @@ struct HomeView: View {
     private func playJump() async {
         guard isHomeVisible else { return }
         guard !isCharacterActionRunning else { return }
+
+        // ✅ トイレ中はジャンプ禁止
+        guard !isToiletLocked else { return }
 
         // ✅ 追加：ホバー中は差し替え優先
         guard !isFoodHoveringOverCharacter else { return }
@@ -877,6 +1073,12 @@ struct HomeView: View {
         defer {
             closeFoodShelf()
             endFoodHoverIfNeeded()
+        }
+
+        // ✅ トイレ中は給餌禁止
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return false
         }
 
         guard let food = FoodCatalog.byId(foodId) else {
@@ -957,6 +1159,9 @@ struct HomeView: View {
 
     // ✅ 大好物だった時の演出（*_love を短時間表示）
     private func playSuperFavoriteReactionIfPossible() {
+        // ✅ トイレ中は演出しない（*_wc 優先）
+        guard !isToiletLocked else { return }
+
         // ホバー中は表情維持したいので、まずホバー解除
         endFoodHoverIfNeeded()
 
@@ -1204,6 +1409,12 @@ struct HomeView: View {
 
     // MARK: - Care (Feed / Bath / Toilet)
     private func onTapFood(state: AppState) {
+        // ✅ トイレ中はごはん不可
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return
+        }
+
         Task { @MainActor in
             Haptics.rattle(duration: 0.12, style: .light)
         }
@@ -1219,6 +1430,12 @@ struct HomeView: View {
     }
 
     private func onTapBath(state: AppState) {
+        // ✅ トイレ中は風呂不可
+        guard !isToiletLocked else {
+            showToiletLockedMessage()
+            return
+        }
+
         let now = Date()
 
         state.ensureDailyResetIfNeeded(now: now)
@@ -1253,8 +1470,13 @@ struct HomeView: View {
     }
 
     private func onTapToilet(state: AppState) {
+        // ✅ トイレ中は「トイレする（解決）」のみ
         if state.toiletFlagAt != nil {
             resolveToilet(state: state)
+
+            // ✅ フラグが消えたので即通常表示へ
+            syncCharacterBaseFromState(force: true)
+            updateToiletWiggle()
             return
         }
 
@@ -1273,6 +1495,10 @@ struct HomeView: View {
             if state.raiseToiletFlag(now: Date()) {
                 save()
                 toast("トイレ行きたい！")
+
+                // ✅ フラグが立ったので wc 表示へ
+                syncCharacterBaseFromState(force: true)
+                updateToiletWiggle()
             }
         }
     }
@@ -1284,6 +1510,10 @@ struct HomeView: View {
         addFriendshipWithAnimation(points: r.isWithin1h ? 20 : 10, state: state)
         toast(r.isWithin1h ? "トイレ成功（1時間以内）+20" : "トイレ成功 +10")
         save()
+
+        // ✅ 解決したら通常に戻す
+        syncCharacterBaseFromState(force: true)
+        updateToiletWiggle()
     }
 
     // MARK: - AppState
@@ -1617,6 +1847,10 @@ private struct RightSideButtons: View {
     let state: AppState
     let onCamera: () -> Void
 
+    // ✅ 追加：トイレ中ロック
+    let isToiletLocked: Bool
+    let onBlocked: () -> Void
+
     let buttonSize: CGFloat
     let spacing: CGFloat
 
@@ -1629,40 +1863,90 @@ private struct RightSideButtons: View {
                     .frame(width: buttonSize, height: buttonSize)
             }
 
-            NavigationLink { MemoriesView() } label: {
-                Image("omoide_button")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
+            if isToiletLocked {
+                Button(action: onBlocked) {
+                    Image("omoide_button")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink { MemoriesView() } label: {
+                    Image("omoide_button")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
             }
 
             // ✅ 追加：思い出ボタンと図鑑ボタンの間に “もじゃ” ボタン
-            NavigationLink { MojaView(state: state) } label: {
-                Image("moja")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
+            if isToiletLocked {
+                Button(action: onBlocked) {
+                    Image("moja")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink { MojaView(state: state) } label: {
+                    Image("moja")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
             }
 
-            NavigationLink { ZukanView() } label: {
-                Image("picture_button")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
+            if isToiletLocked {
+                Button(action: onBlocked) {
+                    Image("picture_button")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink { ZukanView() } label: {
+                    Image("picture_button")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
             }
 
-            NavigationLink { ShopView(state: state) } label: {
-                Image("shop_button")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
+            if isToiletLocked {
+                Button(action: onBlocked) {
+                    Image("shop_button")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink { ShopView(state: state) } label: {
+                    Image("shop_button")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
             }
 
-            NavigationLink { SettingsView() } label: {
-                Image("option_button")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
+            if isToiletLocked {
+                Button(action: onBlocked) {
+                    Image("option_button")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink { SettingsView() } label: {
+                    Image("option_button")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: buttonSize, height: buttonSize)
+                }
             }
         }
     }
