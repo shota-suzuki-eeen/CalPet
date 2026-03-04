@@ -71,6 +71,9 @@ struct HomeView: View {
     // ✅ ごはん棚
     @State private var showFoodShelf: Bool = false
 
+    // ✅ ミニゲーム画面遷移
+    @State private var showMiniGames: Bool = false
+
     // ✅ ドロップターゲット演出
     @State private var isDropTargeted: Bool = false
 
@@ -515,7 +518,7 @@ struct HomeView: View {
                                             showToiletLockedMessage()
                                             return
                                         }
-                                        /* 何もしない */
+                                        showMiniGames = true
                                     },
                                     isSleepAvailable: canSleep,
                                     isBathAvailable: canBath,
@@ -618,6 +621,9 @@ struct HomeView: View {
                 }
             }
             .navigationBarHidden(true)
+            .navigationDestination(isPresented: $showMiniGames) {
+                MiniGamesView(state: state)
+            }
         }
         .confirmationDialog("撮影モードを選択", isPresented: $showCaptureModeDialog, titleVisibility: .visible) {
             Button("ARで撮影") { selectedCaptureMode = .ar }
