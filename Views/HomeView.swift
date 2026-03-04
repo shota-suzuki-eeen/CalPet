@@ -44,6 +44,7 @@ struct HomeView: View {
     // ✅ 撮影ボタンで開くキャプチャ画面制御
     @State private var showCaptureModeDialog: Bool = false
     @State private var selectedCaptureMode: CameraCaptureView.Mode?
+    @State private var showMiniGamesHub: Bool = false
 
     // 軽いトースト（保存完了など）
     @State private var toastMessage: String?
@@ -515,7 +516,7 @@ struct HomeView: View {
                                             showToiletLockedMessage()
                                             return
                                         }
-                                        /* 何もしない */
+                                        showMiniGamesHub = true
                                     },
                                     isSleepAvailable: canSleep,
                                     isBathAvailable: canBath,
@@ -641,6 +642,9 @@ struct HomeView: View {
                 saveTodayPhoto(image, placeName: placeName, latitude: lat, longitude: lon)
                 selectedCaptureMode = nil
             }
+        }
+        .fullScreenCover(isPresented: $showMiniGamesHub) {
+            MiniGamesHubView(state: state)
         }
         .task {
             state.ensureInitialPetsIfNeeded()
