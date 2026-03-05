@@ -1,3 +1,10 @@
+//
+//  StepEnjoyModels.swift
+//  Cal Pet
+//
+//  Created by shota suzuki on 2026/03/05.
+//
+
 import Foundation
 
 struct StepEnjoyLog: Codable, Identifiable, Equatable {

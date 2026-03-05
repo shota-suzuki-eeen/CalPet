@@ -483,11 +483,12 @@ struct HomeView: View {
 
                                 let canFood = true // ✅ 満足度MAXでも棚は開ける
                                 let canBath = isBathAvailablePure(now: now)
-                                let canWc = (state.toiletFlagAt != nil)
+                                let canWc = true // ✅ 重要：トイレフラグ中でも WC ボタンは必ず押せる（唯一許可したい操作）
                                 let canSleep = true
 
                                 BottomButtons(
                                     onSleep: {
+                                        // ✅ トイレ中は押せない（見た目はそのままでもOKだが、動作はブロック）
                                         if isToiletLocked {
                                             showToiletLockedMessage()
                                             return
@@ -509,7 +510,7 @@ struct HomeView: View {
                                         onTapFood(state: state)
                                     },
                                     onWc: {
-                                        // ✅ トイレ中でも押せる（ここでフラグが消えたら通常に戻る）
+                                        // ✅ トイレ中でも押せる（ここでフラグが消えたら通常の状態に戻る）
                                         onTapToilet(state: state)
                                     },
                                     onHome: {
@@ -523,6 +524,8 @@ struct HomeView: View {
                                     isBathAvailable: canBath,
                                     isFoodAvailable: canFood,
                                     isWcAvailable: canWc,
+                                    isToiletLocked: isToiletLocked,
+                                    onBlocked: { showToiletLockedMessage() },
                                     buttonSize: Layout.bottomButtonSize,
                                     spacing: Layout.bottomButtonsSpacing,
                                     horizontalPadding: Layout.bottomHorizontalPadding
@@ -728,7 +731,9 @@ struct HomeView: View {
             .presentationDetents([.medium])
         }
         .fullScreenCover(isPresented: $showStepEnjoy) {
-            StepEnjoyView(state: state, hk: hk, onSave: save)
+            NavigationStack {
+                StepEnjoyView(state: state, hk: hk, onSave: save)
+            }
         }
         .onAppear {
             isHomeVisible = true
@@ -1140,7 +1145,7 @@ struct HomeView: View {
 
         return true
     }
-    
+
     // MARK: - ✅ Super Favorite (NEW)
 
     // ✅ 仕様：キャラごとの大好物（FoodCatalog.FoodItem.id と一致させる）
@@ -1969,6 +1974,10 @@ private struct BottomButtons: View {
     let isFoodAvailable: Bool
     let isWcAvailable: Bool
 
+    // ✅ 追加：トイレ中は WC 以外をブロックしたい
+    let isToiletLocked: Bool
+    let onBlocked: () -> Void
+
     let buttonSize: CGFloat
     let spacing: CGFloat
     let horizontalPadding: CGFloat
@@ -1980,27 +1989,28 @@ private struct BottomButtons: View {
 
     var body: some View {
         HStack(spacing: spacing) {
-            Button(action: onSleep) {
+            Button(action: isToiletLocked ? onBlocked : onSleep) {
                 Image(sleepImageName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: buttonSize, height: buttonSize)
             }
 
-            Button(action: onBath) {
+            Button(action: isToiletLocked ? onBlocked : onBath) {
                 Image(bathImageName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: buttonSize, height: buttonSize)
             }
 
-            Button(action: onFood) {
+            Button(action: isToiletLocked ? onBlocked : onFood) {
                 Image(foodImageName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: buttonSize, height: buttonSize)
             }
 
+            // ✅ 重要：WCはトイレ中でも押せる（唯一許可）
             Button(action: onWc) {
                 Image(wcImageName)
                     .resizable()
@@ -2008,7 +2018,7 @@ private struct BottomButtons: View {
                     .frame(width: buttonSize, height: buttonSize)
             }
 
-            Button(action: onHome) {
+            Button(action: isToiletLocked ? onBlocked : onHome) {
                 Image("home_button")
                     .resizable()
                     .scaledToFit()
