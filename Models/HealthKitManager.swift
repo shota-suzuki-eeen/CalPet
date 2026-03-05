@@ -129,6 +129,27 @@ final class HealthKitManager: ObservableObject {
 
     // MARK: - Fetchers
 
+    public func fetchStepCount(from: Date, to: Date) async -> Int {
+        guard authState == .authorized else { return 0 }
+        do {
+            return max(0, try await fetchSteps(from: from, to: to))
+        } catch {
+            errorMessage = "歩数取得に失敗: \(error.localizedDescription)"
+            return 0
+        }
+    }
+
+    public func fetchTodayStepTotal(now: Date = Date()) async -> Int {
+        let start = Calendar.current.startOfDay(for: now)
+        return await fetchStepCount(from: start, to: now)
+    }
+
+    public func fetchWeekStepTotal(now: Date = Date()) async -> Int {
+        let calendar = Calendar.current
+        let start = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? calendar.startOfDay(for: now)
+        return await fetchStepCount(from: start, to: now)
+    }
+
     private func predicate(from: Date, to: Date) -> NSPredicate {
         HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
     }
