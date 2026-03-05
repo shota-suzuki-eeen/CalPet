@@ -129,6 +129,16 @@ final class HealthKitManager: ObservableObject {
 
     // MARK: - Fetchers
 
+    func fetchStepCount(from: Date, to: Date) async -> Int {
+        guard authState == .authorized else { return 0 }
+        do {
+            return try await fetchSteps(from: from, to: to)
+        } catch {
+            errorMessage = "歩数取得に失敗: \(error.localizedDescription)"
+            return 0
+        }
+    }
+
     private func predicate(from: Date, to: Date) -> NSPredicate {
         HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
     }

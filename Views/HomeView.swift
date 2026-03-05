@@ -44,6 +44,7 @@ struct HomeView: View {
     // ✅ 撮影ボタンで開くキャプチャ画面制御
     @State private var showCaptureModeDialog: Bool = false
     @State private var selectedCaptureMode: CameraCaptureView.Mode?
+    @State private var showTravelView: Bool = false
 
     // 軽いトースト（保存完了など）
     @State private var toastMessage: String?
@@ -515,7 +516,7 @@ struct HomeView: View {
                                             showToiletLockedMessage()
                                             return
                                         }
-                                        /* 何もしない */
+                                        showTravelView = true
                                     },
                                     isSleepAvailable: canSleep,
                                     isBathAvailable: canBath,
@@ -623,6 +624,9 @@ struct HomeView: View {
             Button("ARで撮影") { selectedCaptureMode = .ar }
             Button("通常撮影") { selectedCaptureMode = .plain }
             Button("キャンセル", role: .cancel) {}
+        }
+        .fullScreenCover(isPresented: $showTravelView) {
+            TravelView(state: state, hk: hk)
         }
         .fullScreenCover(item: $selectedCaptureMode) { mode in
             CameraCaptureView(
