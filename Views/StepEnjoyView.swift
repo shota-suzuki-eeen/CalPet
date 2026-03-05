@@ -23,93 +23,60 @@ struct StepEnjoyView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let safeTop = geo.safeAreaInsets.top
-            let safeBottom = geo.safeAreaInsets.bottom
-            let contentWidth = min(geo.size.width - 24, 440)
-            let characterSize = min(geo.size.width * 0.44, 200)
-            let capsuleSize = characterSize + 46
-
             ZStack {
                 movingBackground(width: geo.size.width)
 
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 12) {
-                        header
-                            .frame(maxWidth: contentWidth)
-
-                        Text("いまお世話中: \(currentPetName)")
-                            .font(.headline)
-                            .foregroundStyle(.white.opacity(0.95))
-                            .frame(maxWidth: contentWidth, alignment: .leading)
-
-                        ZStack {
-                            Circle()
-                                .fill(.ultraThinMaterial)
-                                .frame(width: capsuleSize, height: capsuleSize)
-
-                            Image(currentPetAsset)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: characterSize, height: characterSize)
-                                .offset(y: characterBounce ? -7 : 7)
-                                .animation(.easeInOut(duration: 0.32).repeatForever(autoreverses: true), value: characterBounce)
-                        }
-                        .frame(maxWidth: contentWidth)
-
-                        Text("前回から +\(animatedDelta)歩")
-                            .font(.system(size: 34, weight: .heavy, design: .rounded))
-                            .foregroundStyle(.yellow)
-                            .minimumScaleFactor(0.72)
-                            .lineLimit(1)
-                            .monospacedDigit()
-                            .frame(maxWidth: contentWidth)
-
-                        summaryCard
-                            .frame(maxWidth: contentWidth)
-
-                        rewardSection
-                            .frame(maxWidth: contentWidth)
-
-                        Button("更新") {
-                            Task { await refresh(backgroundWidth: geo.size.width) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .frame(maxWidth: contentWidth)
-                        .disabled(viewModel.isLoading)
+                VStack(spacing: 16) {
+                    HStack {
+                        Text("おたのしみ散歩")
+                            .font(.system(size: 30, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Button("とじる") { dismiss() }
+                            .buttonStyle(.borderedProminent)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, safeTop + 8)
-                    .padding(.bottom, max(16, safeBottom + 12))
+                    .padding(.horizontal, 20)
+
+                    Text("いまお世話中: \(currentPetName)")
+                        .font(.headline)
+                        .foregroundStyle(.white.opacity(0.95))
+
+                    ZStack {
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 280, height: 280)
+
+                        Image(currentPetAsset)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 220, height: 220)
+                            .offset(y: characterBounce ? -8 : 8)
+                            .animation(.easeInOut(duration: 0.35).repeatForever(autoreverses: true), value: characterBounce)
+                    }
+
+                    Text("前回から +\(animatedDelta)歩")
+                        .font(.system(size: 38, weight: .heavy, design: .rounded))
+                        .foregroundStyle(.yellow)
+                        .monospacedDigit()
+
+                    summaryCard
+                    rewardSection
+
+                    Button("更新") {
+                        Task { await refresh() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isLoading)
+
+                    Spacer(minLength: 12)
                 }
+                .padding(.top, 16)
+                .padding(.bottom, 24)
             }
         }
         .ignoresSafeArea()
-        .task { await refresh(backgroundWidth: UIScreen.main.bounds.width) }
+        .task { await refresh() }
         .onAppear { characterBounce = true }
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            Text("おたのしみ散歩")
-                .font(.system(size: 30, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
-                .minimumScaleFactor(0.75)
-                .lineLimit(1)
-
-            Spacer(minLength: 8)
-
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.headline.bold())
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.black.opacity(0.25), in: Circle())
-            }
-        }
-        .padding(.horizontal, 4)
     }
 
     private var summaryCard: some View {
@@ -120,6 +87,7 @@ struct StepEnjoyView: View {
         }
         .padding(14)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 20)
     }
 
     private var rewardSection: some View {
@@ -157,6 +125,7 @@ struct StepEnjoyView: View {
         .foregroundStyle(.white)
         .padding(14)
         .background(.black.opacity(0.26), in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 20)
     }
 
     private func metricRow(title: String, value: Int) -> some View {
@@ -211,7 +180,7 @@ struct StepEnjoyView: View {
         .clipped()
     }
 
-    private func refresh(backgroundWidth: CGFloat) async {
+    private func refresh() async {
         viewModel.gainedFoodName = nil
         await viewModel.refresh(state: state, hk: hk, save: onSave)
         runCountUp(to: viewModel.deltaSteps)
@@ -219,7 +188,7 @@ struct StepEnjoyView: View {
         if viewModel.deltaSteps > 0 {
             Haptics.tap(style: .light)
             withAnimation(.linear(duration: 1.2)) {
-                bgOffset = -backgroundWidth
+                bgOffset = -UIScreen.main.bounds.width
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                 bgOffset = 0
