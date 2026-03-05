@@ -71,6 +71,8 @@ struct HomeView: View {
     // ✅ ごはん棚
     @State private var showFoodShelf: Bool = false
 
+    @State private var showStepEnjoySheet: Bool = false
+
     // ✅ ドロップターゲット演出
     @State private var isDropTargeted: Bool = false
 
@@ -515,7 +517,7 @@ struct HomeView: View {
                                             showToiletLockedMessage()
                                             return
                                         }
-                                        /* 何もしない */
+                                        showStepEnjoySheet = true
                                     },
                                     isSleepAvailable: canSleep,
                                     isBathAvailable: canBath,
@@ -724,6 +726,9 @@ struct HomeView: View {
                 }
             )
             .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showStepEnjoySheet) {
+            StepEnjoyView(state: state, hk: hk, onSave: save)
         }
         .onAppear {
             isHomeVisible = true
