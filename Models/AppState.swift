@@ -81,6 +81,18 @@ final class AppState {
     var mojaFusionIsRunning: Bool = false
     var mojaFusionEndAt: Date? = nil
 
+    // MARK: - ✅ Step Enjoy (NEW)
+    var stepEnjoyLastCheckedAt: Date? = nil
+    var stepEnjoyTotalSteps: Int = 0
+    var stepEnjoyLastDeltaSteps: Int = 0
+
+    var stepEnjoyLogsData: Data? = nil
+
+    var stepEnjoyDailyCycleStart: Date = Date()
+    var stepEnjoyDailyRewardCount: Int = 0
+    var stepEnjoyDailyRewardStepBank: Int = 0
+    var stepEnjoyLastRewardAt: Date? = nil
+
     init(
         walletKcal: Int = 0,
         pendingKcal: Int = 0,
@@ -127,7 +139,18 @@ final class AppState {
         // ✅ Moja (NEW) ※呼び出し側が指定したい場合のため引数は残す
         mojaCount: Int = 0,
         mojaFusionIsRunning: Bool = false,
-        mojaFusionEndAt: Date? = nil
+        mojaFusionEndAt: Date? = nil,
+
+        stepEnjoyLastCheckedAt: Date? = nil,
+        stepEnjoyTotalSteps: Int = 0,
+        stepEnjoyLastDeltaSteps: Int = 0,
+
+        stepEnjoyLogsData: Data? = nil,
+
+        stepEnjoyDailyCycleStart: Date = Date(),
+        stepEnjoyDailyRewardCount: Int = 0,
+        stepEnjoyDailyRewardStepBank: Int = 0,
+        stepEnjoyLastRewardAt: Date? = nil
     ) {
         self.walletKcal = walletKcal
         self.pendingKcal = pendingKcal
@@ -176,6 +199,17 @@ final class AppState {
         self.mojaCount = mojaCount
         self.mojaFusionIsRunning = mojaFusionIsRunning
         self.mojaFusionEndAt = mojaFusionEndAt
+
+        self.stepEnjoyLastCheckedAt = stepEnjoyLastCheckedAt
+        self.stepEnjoyTotalSteps = stepEnjoyTotalSteps
+        self.stepEnjoyLastDeltaSteps = stepEnjoyLastDeltaSteps
+
+        self.stepEnjoyLogsData = stepEnjoyLogsData
+
+        self.stepEnjoyDailyCycleStart = stepEnjoyDailyCycleStart
+        self.stepEnjoyDailyRewardCount = stepEnjoyDailyRewardCount
+        self.stepEnjoyDailyRewardStepBank = stepEnjoyDailyRewardStepBank
+        self.stepEnjoyLastRewardAt = stepEnjoyLastRewardAt
     }
 
     static func makeDayKey(_ date: Date) -> String {
@@ -482,6 +516,16 @@ extension AppState {
         satisfactionLastUpdatedAt = now
 
         return (true, before, after, nil)
+    }
+
+    @discardableResult
+    func reduceSatisfactionByOne(now: Date = Date()) -> (before: Int, after: Int) {
+        _ = applySatisfactionDecayIfNeeded(now: now)
+        let before = satisfactionLevel
+        let after = max(0, before - 1)
+        satisfactionLevel = after
+        satisfactionLastUpdatedAt = now
+        return (before, after)
     }
 }
 
