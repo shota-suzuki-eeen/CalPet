@@ -10,8 +10,6 @@ struct StepEnjoyView: View {
     @StateObject private var viewModel = StepEnjoyViewModel()
     @State private var displayedDelta: Int = 0
     @State private var isResetConfirmShown: Bool = false
-    @State private var walkPhase: Double = 0
-    @State private var animateScene: Bool = false
 
     private var currentPetName: String {
         PetMaster.all.first(where: { $0.id == state.currentPetID })?.name ?? "ペット"
@@ -31,153 +29,129 @@ struct StepEnjoyView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                StepEnjoyParallaxBackground(isMoving: animateScene)
-                    .ignoresSafeArea()
-
-                ScrollView {
-                    VStack(spacing: 18) {
-                        VStack(spacing: 10) {
-                            Text("おたのしみ散歩")
-                                .font(.system(size: 30, weight: .black, design: .rounded))
-                                .foregroundStyle(.white)
-
-                            Text("現在お世話中: \(currentPetName)")
-                                .font(.headline)
-                                .foregroundStyle(.white.opacity(0.95))
-                        }
-                        .padding(.top, 8)
-
-                        characterStage
-
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("現在お世話中")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                         HStack(spacing: 12) {
-                            statPill(title: "今日", value: viewModel.dayTotalSteps)
-                            statPill(title: "今週", value: viewModel.weekTotalSteps)
-                            statPill(title: "累計", value: state.stepEnjoyTotalSteps)
+                            Image(currentPetAssetName)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 64, height: 64)
+                            Text(currentPetName)
+                                .font(.title3.bold())
                         }
-
-                        rewardSection
-
-                        HStack {
-                            Button("更新") {
-                                Task { await refresh() }
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            Button("リセット") {
-                                isResetConfirmShown = true
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.white)
-                        }
-                        .padding(.bottom, 14)
                     }
-                    .padding(.horizontal, 16)
+
+                    VStack(spacing: 8) {
+                        Text("前回から")
+                            .font(.headline)
+                        Text("+\(displayedDelta) 歩")
+                            .font(.system(size: 42, weight: .bold, design: .rounded))
+                            .contentTransition(.numericText())
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                    summaryRow(title: "今日の総歩数", value: viewModel.dayTotalSteps)
+                    summaryRow(title: "今週の総歩数", value: viewModel.weekTotalSteps)
+                    summaryRow(title: "この機能内の累計", value: state.stepEnjoyTotalSteps)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("報酬")
+                            .font(.headline)
+                        Button("報酬獲得") {
+                            viewModel.claimReward(state: state, save: onSave)
+                            Haptics.notify(.success)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.claimableCount < 1 || viewModel.isClaiming || isDailyMaxReached)
+
+                        Text("本日の獲得数: \(state.stepEnjoyDailyRewardCount) / \(StepEnjoyRewardPolicy.dailyRewardMaxCount)")
+                        Text("次の報酬まで: \(stepsUntilNext)歩")
+                        Text("獲得可能: \(viewModel.claimableCount)個")
+                            .foregroundStyle(.secondary)
+
+                        if isDailyMaxReached {
+                            Text("今日はこれ以上獲得できません")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                        } else if viewModel.claimableCount < 1 {
+                            Text("2000歩ごとに1個獲得できます")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let food = viewModel.lastGrantedFood {
+                            HStack {
+                                Image(food.assetName)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 34, height: 34)
+                                Text("\(food.name) を獲得！")
+                                    .bold()
+                            }
+                            .padding(8)
+                            .background(Color.green.opacity(0.15))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("直近10回ログ")
+                            .font(.headline)
+                        ForEach(viewModel.logs) { log in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(log.date.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("+\(log.delta)歩 / 累計\(log.totalAfter)歩")
+                                Text("今日\(log.dayTotal)歩・今週\(log.weekTotal)歩")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+
+                    HStack {
+                        Button("更新") {
+                            Task { await refresh() }
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("リセット") {
+                            isResetConfirmShown = true
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
+                .padding()
             }
+            .navigationTitle("おたのしみ散歩")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("閉じる") { dismiss() }
-                        .foregroundStyle(.white)
                 }
             }
-            .toolbarBackground(.hidden, for: .navigationBar)
         }
         .task {
             viewModel.loadCached(state: state)
             await refresh()
         }
-        .confirmationDialog("歩数進捗をリセットしますか？", isPresented: $isResetConfirmShown) {
+        .confirmationDialog("おたのしみ散歩の履歴をリセットしますか？", isPresented: $isResetConfirmShown) {
             Button("リセット", role: .destructive) {
                 viewModel.resetProgress(state: state, save: onSave)
             }
             Button("キャンセル", role: .cancel) {}
         }
-    }
-
-    private var characterStage: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(.white.opacity(0.20))
-                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.4), lineWidth: 1))
-                    .frame(height: 280)
-
-                VStack(spacing: 10) {
-                    Image(currentPetAssetName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 190, height: 190)
-                        .rotationEffect(.degrees(animateScene ? 1.5 : -1.5))
-                        .offset(y: animateScene ? -6 : 4)
-                        .scaleEffect(animateScene ? 1.02 : 0.98)
-                        .offset(x: sin(walkPhase) * (animateScene ? 10 : 0))
-                        .animation(.easeInOut(duration: 0.22), value: animateScene)
-
-                    Text("前回から +\(displayedDelta) 歩")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .contentTransition(.numericText())
-                }
-            }
-        }
-    }
-
-    private var rewardSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("報酬")
-                .font(.title3.bold())
-                .foregroundStyle(.white)
-
-            Button("報酬獲得") {
-                viewModel.claimReward(state: state, save: onSave)
-                Haptics.notify(.success)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(viewModel.claimableCount < 1 || viewModel.isClaiming || isDailyMaxReached)
-
-            Text("本日の獲得数: \(state.stepEnjoyDailyRewardCount) / \(StepEnjoyRewardPolicy.dailyRewardMaxCount)")
-                .foregroundStyle(.white)
-            Text("次の報酬まで: \(stepsUntilNext)歩")
-                .foregroundStyle(.white)
-            Text("獲得可能: \(viewModel.claimableCount)個")
-                .foregroundStyle(.white.opacity(0.9))
-
-            if isDailyMaxReached {
-                Text("今日はこれ以上獲得できません")
-                    .font(.footnote)
-                    .foregroundStyle(.yellow)
-            } else if viewModel.claimableCount < 1 {
-                Text("2000歩ごとに1個獲得できます")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.8))
-            }
-
-            if let food = viewModel.lastGrantedFood {
-                HStack {
-                    Image(food.assetName)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 44, height: 44)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("ごはんをゲット！")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.85))
-                        Text(food.name)
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.green.opacity(0.35))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(.black.opacity(0.22))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func refresh() async {
@@ -187,81 +161,29 @@ struct StepEnjoyView: View {
 
     private func animateDelta(target: Int) async {
         let safeTarget = max(0, target)
-        displayedDelta = 0
-        guard safeTarget > 0 else {
-            animateScene = false
+        if safeTarget == 0 {
+            displayedDelta = 0
             return
         }
-
-        animateScene = true
-        let step = max(1, safeTarget / 40)
+        displayedDelta = 0
+        let step = max(1, safeTarget / 25)
         while displayedDelta < safeTarget {
             displayedDelta = min(safeTarget, displayedDelta + step)
-            walkPhase += 0.35
             Haptics.tap(style: .soft)
-            try? await Task.sleep(nanoseconds: 22_000_000)
+            try? await Task.sleep(nanoseconds: 20_000_000)
         }
-
-        try? await Task.sleep(nanoseconds: 350_000_000)
-        animateScene = false
     }
 
     @ViewBuilder
-    private func statPill(title: String, value: Int) -> some View {
-        VStack(spacing: 4) {
+    private func summaryRow(title: String, value: Int) -> some View {
+        HStack {
             Text(title)
-                .font(.caption.bold())
-                .foregroundStyle(.white.opacity(0.85))
+            Spacer()
             Text("\(value)歩")
-                .font(.subheadline.bold())
-                .foregroundStyle(.white)
+                .bold()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(.white.opacity(0.20))
+        .padding()
+        .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-private struct StepEnjoyParallaxBackground: View {
-    let isMoving: Bool
-    @State private var phase: CGFloat = 0
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                LinearGradient(
-                    colors: [Color(red: 0.17, green: 0.44, blue: 0.88), Color(red: 0.14, green: 0.70, blue: 0.62)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-
-                movingLayer(color: .white.opacity(0.16), y: geo.size.height * 0.34, height: 26, speed: 42, width: geo.size.width)
-                movingLayer(color: .mint.opacity(0.25), y: geo.size.height * 0.58, height: 38, speed: 80, width: geo.size.width)
-                movingLayer(color: .green.opacity(0.30), y: geo.size.height * 0.82, height: 60, speed: 120, width: geo.size.width)
-            }
-            .onAppear { phase = 0 }
-            .task(id: isMoving) {
-                if isMoving {
-                    withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
-                        phase = 300
-                    }
-                } else {
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        phase = 0
-                    }
-                }
-            }
-        }
-    }
-
-    private func movingLayer(color: Color, y: CGFloat, height: CGFloat, speed: CGFloat, width: CGFloat) -> some View {
-        HStack(spacing: 0) {
-            Rectangle().fill(color).frame(width: width)
-            Rectangle().fill(color).frame(width: width)
-            Rectangle().fill(color).frame(width: width)
-        }
-        .frame(width: width * 3, height: height)
-        .offset(x: -(phase * (speed / 120)), y: y)
     }
 }

@@ -5,6 +5,7 @@ final class StepEnjoyViewModel: ObservableObject {
     @Published private(set) var dayTotalSteps: Int = 0
     @Published private(set) var weekTotalSteps: Int = 0
     @Published private(set) var claimableCount: Int = 0
+    @Published private(set) var logs: [StepEnjoyLog] = []
     @Published private(set) var lastGrantedFood: FoodCatalog.FoodItem?
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var isClaiming: Bool = false
@@ -41,6 +42,24 @@ final class StepEnjoyViewModel: ObservableObject {
             dailyRewardCount: state.stepEnjoyDailyRewardCount
         )
 
+        var newLogs = state.stepEnjoyLogs()
+        newLogs.insert(
+            .init(
+                date: now,
+                delta: deltaSteps,
+                totalAfter: state.stepEnjoyTotalSteps,
+                dayTotal: dayTotalSteps,
+                weekTotal: weekTotalSteps,
+                rewardsGranted: 0,
+                satDelta: 0
+            ),
+            at: 0
+        )
+        if newLogs.count > 10 {
+            newLogs = Array(newLogs.prefix(10))
+        }
+        state.setStepEnjoyLogs(newLogs)
+        logs = newLogs
         save()
     }
 
@@ -61,7 +80,26 @@ final class StepEnjoyViewModel: ObservableObject {
             lastGrantedFood = reward
         }
 
-        _ = state.reduceSatisfactionByOne(now: Date())
+        let sat = state.reduceSatisfactionByOne(now: Date())
+
+        var newLogs = state.stepEnjoyLogs()
+        newLogs.insert(
+            .init(
+                date: Date(),
+                delta: 0,
+                totalAfter: state.stepEnjoyTotalSteps,
+                dayTotal: dayTotalSteps,
+                weekTotal: weekTotalSteps,
+                rewardsGranted: 1,
+                satDelta: sat.after - sat.before
+            ),
+            at: 0
+        )
+        if newLogs.count > 10 {
+            newLogs = Array(newLogs.prefix(10))
+        }
+        state.setStepEnjoyLogs(newLogs)
+        logs = newLogs
 
         claimableCount = StepEnjoyRewardPolicy.claimableCount(
             bank: state.stepEnjoyDailyRewardStepBank,
@@ -75,12 +113,15 @@ final class StepEnjoyViewModel: ObservableObject {
             bank: state.stepEnjoyDailyRewardStepBank,
             dailyRewardCount: state.stepEnjoyDailyRewardCount
         )
+        logs = state.stepEnjoyLogs()
     }
 
     func resetProgress(state: AppState, now: Date = Date(), save: () -> Void) {
         state.stepEnjoyLastCheckedAt = now
         state.stepEnjoyTotalSteps = 0
         state.stepEnjoyLastDeltaSteps = 0
+        state.setStepEnjoyLogs([])
+        logs = []
         save()
     }
 }

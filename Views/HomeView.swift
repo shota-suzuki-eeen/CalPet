@@ -727,7 +727,7 @@ struct HomeView: View {
             )
             .presentationDetents([.medium])
         }
-        .fullScreenCover(isPresented: $showStepEnjoySheet) {
+        .sheet(isPresented: $showStepEnjoySheet) {
             StepEnjoyView(state: state, hk: hk, onSave: save)
         }
         .onAppear {
