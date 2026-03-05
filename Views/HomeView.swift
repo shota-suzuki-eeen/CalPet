@@ -77,6 +77,8 @@ struct HomeView: View {
     // ✅ 追加：ドラッグでキャラ上ホバー中か（表情差し替えのため）
     @State private var isFoodHoveringOverCharacter: Bool = false
 
+    @State private var showStepEnjoy: Bool = false
+
     // =========================================================
     // ✅ キャラクターアニメ（アイドルまばたき / タップジャンプ）
     // =========================================================
@@ -515,7 +517,7 @@ struct HomeView: View {
                                             showToiletLockedMessage()
                                             return
                                         }
-                                        /* 何もしない */
+                                        showStepEnjoy = true
                                     },
                                     isSleepAvailable: canSleep,
                                     isBathAvailable: canBath,
@@ -724,6 +726,9 @@ struct HomeView: View {
                 }
             )
             .presentationDetents([.medium])
+        }
+        .fullScreenCover(isPresented: $showStepEnjoy) {
+            StepEnjoyView(state: state, hk: hk, onSave: save)
         }
         .onAppear {
             isHomeVisible = true
