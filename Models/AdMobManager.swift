@@ -21,6 +21,9 @@ enum AdUnitID {
     static let rewardMojaProd: String = "ca-app-pub-1093843343402854/7270666378"
     static let rewardFoodProd: String = "ca-app-pub-1093843343402854/8425488459"
 
+    // ✅ 追加：StepEnjoy 用 reward
+    static let rewardStepEnjoyProd: String = "ca-app-pub-1093843343402854/8425488459"
+
     // ✅ 追加：本番（Interstitial_character_set）
     static let interstitialCharacterSetProd: String = "ca-app-pub-1093843343402854/7464061895"
 
@@ -52,6 +55,15 @@ enum AdUnitID {
         return rewardedTest
         #else
         return rewardFoodProd
+        #endif
+    }
+
+    // ✅ 追加：StepEnjoy 用 reward
+    static var rewardStepEnjoy: String {
+        #if DEBUG
+        return rewardedTest
+        #else
+        return rewardStepEnjoyProd
         #endif
     }
 
@@ -93,7 +105,6 @@ final class AdMobManager: ObservableObject {
 
 private extension UIApplication {
 
-    /// 互換用（既存コードが使っている場合に備えて残す）
     static func activeRootViewController() -> UIViewController? {
         let scenes = UIApplication.shared.connectedScenes
         let windowScene = scenes.first { $0.activationState == .foregroundActive } as? UIWindowScene
@@ -101,7 +112,6 @@ private extension UIApplication {
         return window?.rootViewController
     }
 
-    /// ✅ FocusQuest 側と同じ思想：最前面のVCを取る（広告の表示/ロードが安定する）
     func topMostViewController(base: UIViewController? = nil) -> UIViewController? {
         let baseVC: UIViewController? = {
             if let base { return base }
@@ -128,21 +138,15 @@ private extension UIApplication {
 
 struct AdMobBannerView: UIViewRepresentable {
     let adUnitID: String
-    let width: CGFloat   // ✅ 既存との互換のため残す（固定運用なので基本未使用）
+    let width: CGFloat
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> BannerView {
-        // ✅ FocusQuest と同じ：iPhone想定で 320×50 固定
         let banner = BannerView(adSize: AdSizeBanner)
         banner.adUnitID = adUnitID
-
-        // ✅ topMost VC を使う（rootVCより安定）
         banner.rootViewController = UIApplication.shared.topMostViewController()
-
-        // ✅ 背景は透明
         banner.backgroundColor = .clear
-
         banner.load(Request())
 
         context.coordinator.lastLoadedAdUnitID = adUnitID
@@ -153,7 +157,6 @@ struct AdMobBannerView: UIViewRepresentable {
         uiView.rootViewController = UIApplication.shared.topMostViewController()
         uiView.backgroundColor = .clear
 
-        // ✅ adUnit が変わったときだけ再ロード（width変動では再ロードしない）
         if context.coordinator.lastLoadedAdUnitID != adUnitID {
             uiView.adUnitID = adUnitID
             uiView.load(Request())
@@ -166,23 +169,17 @@ struct AdMobBannerView: UIViewRepresentable {
     }
 }
 
-/// ✅ レイアウト維持用（既存のHomeView上部スペース等に置く想定）
 struct BannerArea: View {
     let height: CGFloat
     let adUnitID: String
     var maxWidth: CGFloat? = nil
     var contentHeight: CGFloat = 50
-
-    // ✅ 追加：広告だけを下げる量（セーフエリア直下にしたい）
     var topOffset: CGFloat = 10
 
     var body: some View {
         GeometryReader { proxy in
             let rawW = max(1, proxy.size.width)
-
-            // ✅ 互換のため残す（固定運用なので最終的に width は効きづらいが、既存設計は壊さない）
             let w = normalizeBannerWidth(rawW)
-
             let adH = min(max(1, contentHeight), height)
 
             ZStack {
@@ -198,7 +195,6 @@ struct BannerArea: View {
         .frame(height: height)
     }
 
-    /// ✅ banner要求に使う width を「ポイント幅」に正規化する（互換用）
     private func normalizeBannerWidth(_ rawW: CGFloat) -> CGFloat {
         let screenW = UIScreen.main.bounds.width
         let scale = UIScreen.main.scale
@@ -255,7 +251,6 @@ final class RewardedAdManager: ObservableObject {
             return
         }
 
-        // ✅ topMost VC を使う（rootVCより安定）
         guard let root = UIApplication.shared.topMostViewController() else {
             isReady = false
             return
@@ -265,7 +260,6 @@ final class RewardedAdManager: ObservableObject {
             onReward()
         }
 
-        // 表示後は再ロード推奨
         isReady = false
         rewardedAd = nil
         load()
@@ -281,8 +275,6 @@ final class InterstitialAdManager: NSObject, ObservableObject {
 
     private let adUnitID: String
     private var interstitialAd: InterstitialAd?
-
-    // 「見終わったら（dismissされたら）」呼ぶ
     private var onDismiss: (() -> Void)?
 
     init(adUnitID: String) {
@@ -310,14 +302,12 @@ final class InterstitialAdManager: NSObject, ObservableObject {
         }
     }
 
-    /// - Parameter onDismiss: 広告が閉じられたタイミングで実行
     func show(onDismiss: @escaping () -> Void) {
         guard let ad = interstitialAd else {
             isReady = false
             return
         }
 
-        // ✅ topMost VC を使う（rootVCより安定）
         guard let root = UIApplication.shared.topMostViewController() else {
             isReady = false
             return
@@ -328,7 +318,6 @@ final class InterstitialAdManager: NSObject, ObservableObject {
 
         ad.present(from: root)
 
-        // 表示したら一旦クリア（次回のために dismiss 後に reload する）
         isReady = false
         interstitialAd = nil
     }

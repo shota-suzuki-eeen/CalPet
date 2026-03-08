@@ -49,7 +49,15 @@ final class StepEnjoyViewModel: ObservableObject {
         save()
     }
 
-    func claimReward(state: AppState, save: () -> Void) {
+    func claimNormalReward(state: AppState, save: () -> Void) {
+        claimReward(state: state, decreaseSatisfaction: false, save: save)
+    }
+
+    func claimAdReward(state: AppState, save: () -> Void) {
+        claimReward(state: state, decreaseSatisfaction: true, save: save)
+    }
+
+    private func claimReward(state: AppState, decreaseSatisfaction: Bool, save: () -> Void) {
         guard !isClaiming else { return }
         isClaiming = true
         defer { isClaiming = false }
@@ -72,7 +80,9 @@ final class StepEnjoyViewModel: ObservableObject {
             gainedFoodName = nil
         }
 
-        _ = state.decreaseSatisfaction(by: 1, now: Date())
+        if decreaseSatisfaction {
+            _ = state.decreaseSatisfaction(by: 1, now: Date())
+        }
 
         claimableCount = StepEnjoyRewardPolicy.claimableCount(
             bank: state.stepEnjoyDailyRewardStepBank,

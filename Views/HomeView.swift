@@ -186,6 +186,22 @@ struct HomeView: View {
         displayedSatisfaction >= Layout.satisfactionSegments
     }
 
+    // ✅ 追加：
+    // 「今この瞬間に静止状態で表示すべきアセット名」を一元管理する。
+    // 通常復帰時に currentBaseAssetName を直接使うと、
+    // トイレ中でも通常アセットへ戻ってしまい、*_wc と交互表示になる原因になる。
+    private var preferredCharacterRestAssetName: String {
+        if isToiletLocked, canShowWcAsset {
+            return "\(currentBaseAssetName)_wc"
+        }
+
+        if isFoodHoveringOverCharacter, canPlayCharacterAnimation {
+            return isSatisfactionMax ? "\(currentBaseAssetName)_burp" : "\(currentBaseAssetName)_hungry"
+        }
+
+        return currentBaseAssetName
+    }
+
     // MARK: - Layout
     fileprivate enum Layout {
         static let bannerHeight: CGFloat = 76
@@ -679,6 +695,9 @@ struct HomeView: View {
 
             // ✅ トイレモジモジ開始/停止
             updateToiletWiggle()
+
+            // ✅ 起動直後の非同期処理完了後にも表示を正で揃える
+            syncCharacterBaseFromState(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             state.ensureInitialPetsIfNeeded()
@@ -707,6 +726,9 @@ struct HomeView: View {
 
                 // ✅ トイレモジモジ更新
                 updateToiletWiggle()
+
+                // ✅ 復帰後の各種更新後にも最終的な表示を正で揃える
+                syncCharacterBaseFromState(force: true)
             }
         }
         .sheet(isPresented: $showGoalSheet) {
@@ -753,6 +775,9 @@ struct HomeView: View {
 
             // ✅ トイレモジモジ更新
             updateToiletWiggle()
+
+            // ✅ onAppear の最後でも静止アセットを確定
+            syncCharacterBaseFromState(force: true)
         }
         .onDisappear {
             isHomeVisible = false
@@ -761,8 +786,8 @@ struct HomeView: View {
             stopCharacterIdleLoop()
             isCharacterActionRunning = false
 
-            // ✅ 修正：purpor 固定に戻さず、ベースに戻す
-            characterAssetName = currentBaseAssetName
+            // ✅ 修正：固定ベースではなく、その時点での正しい静止アセットへ戻す
+            characterAssetName = preferredCharacterRestAssetName
         }
         .onChange(of: state.walletKcal) { _, _ in
             guard isHomeVisible else { return }
@@ -838,20 +863,7 @@ struct HomeView: View {
             guard !isCharacterActionRunning else { return }
         }
 
-        // ✅ トイレ中は *_wc を最優先（ホバーや通常表情より優先）
-        if isToiletLocked, canShowWcAsset {
-            characterAssetName = "\(currentBaseAssetName)_wc"
-            return
-        }
-
-        // ホバー中は “ホバー用アセット” が優先
-        if isFoodHoveringOverCharacter {
-            beginFoodHover()
-            return
-        }
-
-        // 既存のアニメ系がpurpor前提なので、purpor以外は静止画運用
-        characterAssetName = currentBaseAssetName
+        characterAssetName = preferredCharacterRestAssetName
     }
 
     // MARK: - ✅ Food Hover（*_hungry / *_burp）
@@ -867,7 +879,7 @@ struct HomeView: View {
 
         // hover差し替え素材が無いキャラはベースのまま
         guard canPlayCharacterAnimation else {
-            characterAssetName = currentBaseAssetName
+            characterAssetName = preferredCharacterRestAssetName
             return
         }
 
@@ -885,7 +897,7 @@ struct HomeView: View {
         // アクション中は自然復帰に任せる（完了時に base に戻る）
         guard !isCharacterActionRunning else { return }
 
-        characterAssetName = currentBaseAssetName
+        characterAssetName = preferredCharacterRestAssetName
     }
 
     // MARK: - FoodShelf
@@ -944,7 +956,7 @@ struct HomeView: View {
                 // ✅ 修正：まばたき対応キャラのみ実行（purpor 固定をやめる）
                 if !canPlayBlinkAnimation {
                     await MainActor.run {
-                        characterAssetName = currentBaseAssetName
+                        characterAssetName = preferredCharacterRestAssetName
                     }
                     continue
                 }
@@ -1002,7 +1014,7 @@ struct HomeView: View {
 
         // ✅ 修正：まばたき対応キャラのみ
         guard canPlayBlinkAnimation else {
-            await MainActor.run { characterAssetName = currentBaseAssetName }
+            await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
             return
         }
 
@@ -1030,7 +1042,7 @@ struct HomeView: View {
         if isToiletLocked { return }
         if isFoodHoveringOverCharacter { return }
 
-        await MainActor.run { characterAssetName = currentBaseAssetName }
+        await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
     }
 
     private func playJump() async {
@@ -1045,7 +1057,7 @@ struct HomeView: View {
 
         // ✅ 修正：タップアクションは対応キャラのみ
         guard canPlayTapAnimation else {
-            await MainActor.run { characterAssetName = currentBaseAssetName }
+            await MainActor.run { characterAssetName = preferredCharacterRestAssetName }
             return
         }
 
@@ -1068,7 +1080,7 @@ struct HomeView: View {
         try? await Task.sleep(nanoseconds: 90_000_000)
 
         await MainActor.run {
-            characterAssetName = currentBaseAssetName
+            characterAssetName = preferredCharacterRestAssetName
             isCharacterActionRunning = false
         }
 
@@ -1191,12 +1203,7 @@ struct HomeView: View {
             try? await Task.sleep(nanoseconds: 900_000_000) // 0.9s表示
 
             await MainActor.run {
-                // ここでホバーしているならホバー表情へ、そうでなければベースへ
-                if isFoodHoveringOverCharacter {
-                    beginFoodHover()
-                } else {
-                    characterAssetName = currentBaseAssetName
-                }
+                characterAssetName = preferredCharacterRestAssetName
                 isCharacterActionRunning = false
             }
         }
@@ -1600,6 +1607,9 @@ struct HomeView: View {
                 )
             }
         }
+
+        // ✅ 非同期同期処理後に、キャラ表示を正しい静止状態へ再同期
+        syncCharacterBaseFromState(force: true)
     }
 
     private func playGainAnimationIfNeeded(
@@ -1658,6 +1668,9 @@ struct HomeView: View {
         }
 
         isAnimatingGain = false
+
+        // ✅ 演出終了後も、その時点の正しい静止状態へ戻す
+        syncCharacterBaseFromState(force: true)
     }
 }
 
