@@ -21,8 +21,8 @@ enum AdUnitID {
     static let rewardMojaProd: String = "ca-app-pub-1093843343402854/7270666378"
     static let rewardFoodProd: String = "ca-app-pub-1093843343402854/8425488459"
 
-    // ✅ 追加：StepEnjoy 用 reward
-    static let rewardStepEnjoyProd: String = "ca-app-pub-1093843343402854/8425488459"
+    // ✅ 修正：StepEnjoy 用 reward
+    static let rewardStepEnjoyProd: String = "ca-app-pub-1093843343402854/9594684608"
 
     // ✅ 追加：本番（Interstitial_character_set）
     static let interstitialCharacterSetProd: String = "ca-app-pub-1093843343402854/7464061895"
@@ -58,7 +58,7 @@ enum AdUnitID {
         #endif
     }
 
-    // ✅ 追加：StepEnjoy 用 reward
+    // ✅ StepEnjoy 用 reward
     static var rewardStepEnjoy: String {
         #if DEBUG
         return rewardedTest

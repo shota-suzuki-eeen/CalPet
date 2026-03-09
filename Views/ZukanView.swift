@@ -14,7 +14,10 @@ struct ZukanView: View {
 
     private var state: AppState? { appStates.first }
 
-    private var initialPetIDs: [String] { AppState.initialZukanPetIDs }
+    // ✅ pet_011 は未実装のため図鑑表示から除外
+    private var initialPetIDs: [String] {
+        AppState.initialZukanPetIDs.filter { $0 != "pet_011" }
+    }
     private let columns: [GridItem] = Array(repeating: GridItem(.flexible(), spacing: 10), count: 4)
 
     @State private var selectedPetID: String? = nil
@@ -76,8 +79,12 @@ struct ZukanView: View {
         .onAppear {
             guard let state else { return }
             state.ensureInitialPetsIfNeeded()
-            if selectedPetID == nil {
-                selectedPetID = state.currentPetID
+
+            // ✅ 選択中IDが未実装IDだった場合の保険
+            if selectedPetID == nil || selectedPetID == "pet_011" {
+                selectedPetID = initialPetIDs.contains(state.currentPetID)
+                    ? state.currentPetID
+                    : initialPetIDs.first
             }
 
             // ✅ 追加：初回から出せるように事前ロード

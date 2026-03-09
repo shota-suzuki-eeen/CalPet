@@ -119,13 +119,65 @@ final class MojaViewModel: ObservableObject {
         syncFusionIfNeeded(now: now)
     }
 
-    /// 「もじゃをまとめる」押下（✅ 受け取り待ちのときは start しない）
+    /// ✅ 開始可能判定
+    /// - 仕様変更:
+    ///   - 全キャラ所持でも「ボタンは押せる」ため、
+    ///     ここでは未所持キャラの有無は見ない
+    func canStartFusion(state: AppState) -> Bool {
+        if fusionIsRunning { return false }
+        if fusionIsReadyToClaim { return false }
+        if mojaCount < fusionCost { return false }
+        return true
+    }
+
+    /// 「もじゃをまとめる」押下（旧互換用）
+    /// - 注意: 既存呼び出しを壊さないため残している
+    /// - 最新仕様では `startFusion(now:state:)` を使用すること
     func startFusion(now: Date) {
         guard fusionIsRunning == false else { return }
         guard fusionIsReadyToClaim == false else { return }
 
         guard mojaCount >= fusionCost else {
             toastCenter("もじゃが足りない…")
+            return
+        }
+
+        mojaCount -= fusionCost
+        persistMojaCount()
+
+        fusionIsRunning = true
+        fusionIsReadyToClaim = false
+        fusionFrameIndex = 0
+
+        let end = now.addingTimeInterval(fusionDuration)
+        fusionEndAt = end
+
+        persistFusionProgress()
+
+        toastCenter("もじゃがまとまり始めた！")
+
+        // ✅ ここでTicker開始
+        startTickerIfNeeded()
+    }
+
+    /// ✅ 「もじゃをまとめる」押下（最新仕様）
+    /// - 全キャラ所持時は融合開始せず、中央トーストだけ表示
+    func startFusion(now: Date, state: AppState) {
+        guard fusionIsRunning == false else { return }
+        guard fusionIsReadyToClaim == false else { return }
+
+        guard mojaCount >= fusionCost else {
+            toastCenter("もじゃが足りない…")
+            return
+        }
+
+        state.ensureInitialPetsIfNeeded()
+
+        let owned = Set(state.ownedPetIDs())
+        let candidates = AppState.initialZukanPetIDs.filter { !owned.contains($0) }
+
+        guard candidates.isEmpty == false else {
+            toastCenter("コンプリートおめでとう！\n 新しいカルペットが遊びにくるのをお楽しみに！")
             return
         }
 
@@ -158,7 +210,6 @@ final class MojaViewModel: ObservableObject {
 
         guard let newId = candidates.randomElement() else {
             toastCenter("全部のキャラを持っている！")
-            // 状態だけは初期に戻してもいいが、ここは仕様が曖昧なので維持
             return
         }
 
@@ -265,7 +316,7 @@ final class MojaViewModel: ObservableObject {
                 if Task.isCancelled { break }
                 if self.fusionIsRunning == false { break }
 
-                // ✅ 完了判定（ここがないと「0になっても終わらない」）
+                // ✅ 完了判定
                 self.syncFusionIfNeeded(now: Date())
 
                 // ✅ まだ走っているならフレーム更新（見た目用）

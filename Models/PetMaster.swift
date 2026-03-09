@@ -104,6 +104,7 @@ enum PetMaster {
     /// ✅ 各キャラの「大好物」名称（マスタ）
     static func superFavoriteFoodName(for petID: String) -> String {
         switch petID {
+        case "pet_000": return "おにぎり"
         case "pet_001": return "ラーメン"
         case "pet_002": return "ソフトクリーム"
         case "pet_003": return "ハンバーガー"
@@ -111,7 +112,6 @@ enum PetMaster {
         case "pet_005": return "ヨーグルト"
         case "pet_006": return "サラダ"
         case "pet_007": return "コーヒー"
-        case "pet_000": return "おにぎり"   // purpor
         case "pet_008": return "お鍋"
         case "pet_009": return "ステーキ"
         case "pet_010": return "ピザ"

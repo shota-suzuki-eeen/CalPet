@@ -34,18 +34,19 @@ final class AppState {
     var friendshipPoint: Int
     var friendshipCardCount: Int
 
-    // MARK: - ✅ Satisfaction (Feed Spec: NEW)
-    // ✅ 重要：初期値が 3 だと満足度MAXで永遠にご飯できないので 0 にする
+    // MARK: - ✅ Satisfaction
     var satisfactionLevel: Int
     var satisfactionLastUpdatedAt: Date?
 
     // ✅ お風呂
-    var bathLastAt: Date?
-    var bathAdViewsToday: Int
+    var bathFlagAt: Date?
+    var bathLastRaisedAt: Date?
+    var bathNextSpawnAt: Date?
 
     // ✅ トイレ
     var toiletFlagAt: Date?
     var toiletLastRaisedAt: Date?
+    var toiletNextSpawnAt: Date?
 
     // ✅ 卵（ショップ）
     var eggOwned: Bool
@@ -70,13 +71,9 @@ final class AppState {
     var ownedFoodCountsData: Data?
 
     // MARK: - ✅ Super Favorite Reveal (NEW)
-    // ⚠️ SwiftDataのマイグレーション安定のため「宣言側」にデフォルトを置く
-    // petID -> Bool（大好物が判明しているか）
     var superFavoriteRevealedData: Data? = nil
 
     // MARK: - ✅ Moja (NEW)
-    // ⚠️ 重要：SwiftDataのマイグレーション安定のため「宣言側」にデフォルトを置く
-    // （init の default だけだと既存ストアからの移行で値が入らず、AppStateが読めない原因になりやすい）
     var mojaCount: Int = 0
     var mojaFusionIsRunning: Bool = false
     var mojaFusionEndAt: Date? = nil
@@ -104,15 +101,16 @@ final class AppState {
         friendshipPoint: Int = 0,
         friendshipCardCount: Int = 0,
 
-        // ✅ 修正：初期満足度は 0（MAX=3）
         satisfactionLevel: Int = 0,
         satisfactionLastUpdatedAt: Date? = nil,
 
-        bathLastAt: Date? = nil,
-        bathAdViewsToday: Int = 0,
+        bathFlagAt: Date? = nil,
+        bathLastRaisedAt: Date? = nil,
+        bathNextSpawnAt: Date? = nil,
 
         toiletFlagAt: Date? = nil,
         toiletLastRaisedAt: Date? = nil,
+        toiletNextSpawnAt: Date? = nil,
 
         eggOwned: Bool = false,
         eggHatchAt: Date? = nil,
@@ -131,10 +129,8 @@ final class AppState {
 
         ownedFoodCountsData: Data? = nil,
 
-        // ✅ Super Favorite Reveal (NEW)
         superFavoriteRevealedData: Data? = nil,
 
-        // ✅ Moja (NEW) ※呼び出し側が指定したい場合のため引数は残す
         mojaCount: Int = 0,
         mojaFusionIsRunning: Bool = false,
         mojaFusionEndAt: Date? = nil,
@@ -165,11 +161,13 @@ final class AppState {
         self.satisfactionLevel = satisfactionLevel
         self.satisfactionLastUpdatedAt = satisfactionLastUpdatedAt
 
-        self.bathLastAt = bathLastAt
-        self.bathAdViewsToday = bathAdViewsToday
+        self.bathFlagAt = bathFlagAt
+        self.bathLastRaisedAt = bathLastRaisedAt
+        self.bathNextSpawnAt = bathNextSpawnAt
 
         self.toiletFlagAt = toiletFlagAt
         self.toiletLastRaisedAt = toiletLastRaisedAt
+        self.toiletNextSpawnAt = toiletNextSpawnAt
 
         self.eggOwned = eggOwned
         self.eggHatchAt = eggHatchAt
@@ -188,10 +186,8 @@ final class AppState {
 
         self.ownedFoodCountsData = ownedFoodCountsData
 
-        // ✅ Super Favorite Reveal (NEW)
         self.superFavoriteRevealedData = superFavoriteRevealedData
 
-        // ✅ Moja (NEW)
         self.mojaCount = mojaCount
         self.mojaFusionIsRunning = mojaFusionIsRunning
         self.mojaFusionEndAt = mojaFusionEndAt
@@ -216,7 +212,7 @@ final class AppState {
     }
 }
 
-// MARK: - Currency helpers（今回追加：安全に pending → wallet へ移す）
+// MARK: - Currency helpers
 extension AppState {
     @discardableResult
     func drainPendingKcalToWallet() -> Int {
@@ -228,7 +224,7 @@ extension AppState {
     }
 }
 
-// MARK: - Food Inventory（今回追加）
+// MARK: - Food Inventory
 extension AppState {
     private func ownedFoodCounts() -> [String: Int] {
         guard let data = ownedFoodCountsData,
@@ -286,7 +282,7 @@ extension AppState {
     }
 }
 
-// MARK: - ✅ Super Favorite Reveal helpers (NEW)
+// MARK: - ✅ Super Favorite Reveal helpers
 extension AppState {
     private func superFavoriteRevealedMap() -> [String: Bool] {
         guard let data = superFavoriteRevealedData,
@@ -300,16 +296,13 @@ extension AppState {
         superFavoriteRevealedData = try? JSONEncoder().encode(dict)
     }
 
-    /// ✅ 大好物が判明しているか
     func isSuperFavoriteRevealed(petID: String) -> Bool {
         let dict = superFavoriteRevealedMap()
         return dict[petID] ?? false
     }
 
-    /// ✅ 大好物を判明済みにする（すでにtrueなら何もしない）
     @discardableResult
     func revealSuperFavorite(petID: String) -> Bool {
-        // 図鑑対象外のIDを誤って入れない保険（必要なければ外してOK）
         if !isValidZukanPetID(petID) { return false }
 
         var dict = superFavoriteRevealedMap()
@@ -321,28 +314,22 @@ extension AppState {
     }
 }
 
-// MARK: - Day Reset (Care Spec)
+// MARK: - Day Reset
 extension AppState {
     func ensureDailyResetIfNeeded(now: Date = Date()) {
         let todayKey = AppState.makeDayKey(now)
         guard lastDayKey != todayKey else { return }
 
-        bathAdViewsToday = 0
-        toiletFlagAt = nil
-        toiletLastRaisedAt = nil
-
         if satisfactionLastUpdatedAt == nil {
             satisfactionLastUpdatedAt = now
         }
 
-        // ✅ Moja：リアル時間進行のため日跨ぎでリセットしない
-        // ✅ 大好物判明：永続のため日跨ぎでリセットしない
-
+        // ✅ 発生中フラグ・次回予定時刻は日跨ぎでも維持
         lastDayKey = todayKey
     }
 }
 
-// MARK: - Today Cache helpers（再起動で0上書きされるのを防ぐ用途）
+// MARK: - Today Cache helpers
 extension AppState {
     struct CacheUpdateResult: Equatable {
         let stepsToUse: Int
@@ -433,7 +420,7 @@ extension AppState {
     }
 }
 
-// MARK: - ✅ Satisfaction (Feed / Decay: NEW)
+// MARK: - ✅ Satisfaction
 extension AppState {
     private static let satisfactionDecayUnitSeconds: TimeInterval = 2 * 60 * 60
     private static let satisfactionMax: Int = 3
@@ -526,63 +513,85 @@ extension AppState {
 
 // MARK: - Care (Bath / Toilet)
 extension AppState {
-    private static let bathCooldownSeconds: TimeInterval = 8 * 60 * 60
-    private static let bathAdReduceSecondsPerWatch: TimeInterval = 4 * 60 * 60
-    private static let bathAdLimitPerDay: Int = 2
-
-    func canBathNow(now: Date = Date()) -> (can: Bool, remainingSeconds: TimeInterval) {
-        guard let last = bathLastAt else { return (true, 0) }
-
-        let elapsed = now.timeIntervalSince(last)
-        let remaining = AppState.bathCooldownSeconds - elapsed
-        if remaining <= 0 { return (true, 0) }
-        return (false, remaining)
-    }
-
-    func canUseBathAd(now: Date = Date()) -> (can: Bool, reason: String?) {
-        if bathAdViewsToday >= AppState.bathAdLimitPerDay {
-            return (false, "本日の広告短縮は上限（2回）に達しています")
-        }
-        let bath = canBathNow(now: now)
-        if bath.can {
-            return (false, "クールタイムが残っていないため広告短縮は不要です")
-        }
-        return (true, nil)
-    }
-
-    func applyBathAdReduction(now: Date = Date()) {
-        ensureDailyResetIfNeeded(now: now)
-
-        guard bathAdViewsToday < AppState.bathAdLimitPerDay else { return }
-        guard let last = bathLastAt else { return }
-
-        bathAdViewsToday += 1
-        bathLastAt = last.addingTimeInterval(-AppState.bathAdReduceSecondsPerWatch)
-    }
-
-    func markBathDone(now: Date = Date()) {
-        ensureDailyResetIfNeeded(now: now)
-        bathLastAt = now
-    }
-
+    private static let careMinIntervalSeconds: TimeInterval = 60 * 60
+    private static let careMaxIntervalSeconds: TimeInterval = 2 * 60 * 60
     private static let toiletBonusWindowSeconds: TimeInterval = 60 * 60
-    private static let toiletMinIntervalSeconds: TimeInterval = 60 * 60
+
+    private func randomCareInterval() -> TimeInterval {
+        TimeInterval.random(in: AppState.careMinIntervalSeconds...AppState.careMaxIntervalSeconds)
+    }
+
+    // MARK: Bath
+
+    var hasBathFlag: Bool {
+        bathFlagAt != nil
+    }
+
+    func ensureBathNextSpawnScheduled(now: Date = Date()) {
+        if bathNextSpawnAt == nil {
+            bathNextSpawnAt = now.addingTimeInterval(randomCareInterval())
+        }
+    }
+
+    func canRaiseBathFlag(now: Date = Date()) -> Bool {
+        if bathFlagAt != nil { return false }
+
+        if let next = bathNextSpawnAt {
+            return now >= next
+        }
+
+        return false
+    }
+
+    @discardableResult
+    func raiseBathFlag(now: Date = Date()) -> Bool {
+        ensureDailyResetIfNeeded(now: now)
+        ensureBathNextSpawnScheduled(now: now)
+
+        guard canRaiseBathFlag(now: now) else { return false }
+
+        bathFlagAt = now
+        bathLastRaisedAt = now
+        return true
+    }
+
+    @discardableResult
+    func raiseBathFlagIfNeeded(now: Date = Date()) -> Bool {
+        raiseBathFlag(now: now)
+    }
+
+    func resolveBath(now: Date = Date()) -> Bool {
+        ensureDailyResetIfNeeded(now: now)
+
+        guard bathFlagAt != nil else { return false }
+
+        bathFlagAt = nil
+        bathNextSpawnAt = now.addingTimeInterval(randomCareInterval())
+        return true
+    }
+
+    // MARK: Toilet
+
+    func ensureToiletNextSpawnScheduled(now: Date = Date()) {
+        if toiletNextSpawnAt == nil {
+            toiletNextSpawnAt = now.addingTimeInterval(randomCareInterval())
+        }
+    }
 
     func canRaiseToiletFlag(now: Date = Date()) -> Bool {
         if toiletFlagAt != nil { return false }
 
-        if let last = toiletLastRaisedAt {
-            let elapsed = now.timeIntervalSince(last)
-            if elapsed < AppState.toiletMinIntervalSeconds {
-                return false
-            }
+        if let next = toiletNextSpawnAt {
+            return now >= next
         }
-        return true
+
+        return false
     }
 
     @discardableResult
     func raiseToiletFlag(now: Date = Date()) -> Bool {
         ensureDailyResetIfNeeded(now: now)
+        ensureToiletNextSpawnScheduled(now: now)
 
         guard canRaiseToiletFlag(now: now) else { return false }
 
@@ -602,14 +611,13 @@ extension AppState {
         let within = elapsed <= AppState.toiletBonusWindowSeconds
 
         toiletFlagAt = nil
+        toiletNextSpawnAt = now.addingTimeInterval(randomCareInterval())
         return (true, within)
     }
 }
 
-// MARK: - Pets (owned list helpers)
+// MARK: - Pets
 extension AppState {
-    /// ✅ 図鑑の初期実装予定：12体（pet_000 ... pet_011）
-    /// View / ViewModel で同じ配列を持つとズレの原因になるため AppState 側に集約
     static let initialZukanPetIDs: [String] = (0..<12).map { String(format: "pet_%03d", $0) }
 
     func ownedPetIDs() -> [String] {
@@ -633,10 +641,6 @@ extension AppState {
         }
     }
 
-    /// ✅ 追加：未所持の中から1体を完全ランダムで獲得する
-    /// - すでに全て所持している場合は nil
-    /// - 獲得したIDは ownedPetIDs に追加（重複しない）
-    /// - currentPetID は変更しない（既存仕様を壊さない）
     @discardableResult
     func acquireRandomPetIfPossible() -> String? {
         var owned = ownedPetIDs()
@@ -650,13 +654,12 @@ extension AppState {
         return picked
     }
 
-    /// ✅ 追加：図鑑IDとして有効か（保険）
     func isValidZukanPetID(_ id: String) -> Bool {
         AppState.initialZukanPetIDs.contains(id)
     }
 }
 
-// MARK: - ✅ Moja helpers (NEW)
+// MARK: - ✅ Moja helpers
 extension AppState {
     @discardableResult
     func addMoja(_ count: Int = 1) -> Bool {

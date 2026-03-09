@@ -24,6 +24,37 @@ struct MojaView: View {
         viewModel.fusionIsRunning && !viewModel.fusionIsReadyToClaim
     }
 
+    /// ✅ 未開始時の押下可否
+    private var canStartFusion: Bool {
+        viewModel.canStartFusion(state: state)
+    }
+
+    /// ✅ ボタン無効状態を集約
+    private var isMainButtonDisabled: Bool {
+        if viewModel.fusionIsReadyToClaim {
+            return false
+        }
+
+        if viewModel.fusionIsRunning {
+            return !rewardedAd.isReady
+        }
+
+        return !canStartFusion
+    }
+
+    /// ✅ ボタンの見た目用 opacity
+    private var mainButtonOpacity: Double {
+        if viewModel.fusionIsRunning && !rewardedAd.isReady {
+            return 0.6
+        }
+
+        if !viewModel.fusionIsRunning && !viewModel.fusionIsReadyToClaim && !canStartFusion {
+            return 0.5
+        }
+
+        return 1.0
+    }
+
     var body: some View {
         ZStack {
             // ✅ 元の背景（レイアウト維持のため残す）
@@ -78,8 +109,8 @@ struct MojaView: View {
                         return
                     }
 
-                    // ✅ まとめ開始
-                    viewModel.startFusion(now: Date())
+                    // ✅ まとめ開始（全キャラ所持時はトースト表示のみ）
+                    viewModel.startFusion(now: Date(), state: state)
                     save()
 
                     // 開始後、念のため次の広告もロードしておく
@@ -108,12 +139,8 @@ struct MojaView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(.horizontal, 18)
-                // ✅ running中は “広告が準備できたら押せる”
-                .disabled(viewModel.fusionIsReadyToClaim ? false :
-                          viewModel.fusionIsRunning ? !rewardedAd.isReady :
-                          viewModel.isActionButtonDisabled)
-                .opacity((viewModel.fusionIsRunning && !rewardedAd.isReady) ? 0.6 :
-                         (viewModel.isActionButtonDisabled ? 0.5 : 1.0))
+                .disabled(isMainButtonDisabled)
+                .opacity(mainButtonOpacity)
 
                 // ④ 所持している (moja)
                 HStack(spacing: 6) {
@@ -160,6 +187,7 @@ struct MojaView: View {
                 VStack {
                     Text(msg)
                         .font(.headline)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(.ultraThinMaterial)
