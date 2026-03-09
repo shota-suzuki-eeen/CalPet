@@ -422,7 +422,7 @@ extension AppState {
 
 // MARK: - ✅ Satisfaction
 extension AppState {
-    private static let satisfactionDecayUnitSeconds: TimeInterval = 2 * 60 * 60
+    private static let satisfactionDecayUnitSeconds: TimeInterval = 60 * 60
     private static let satisfactionMax: Int = 3
 
     private func clampSatisfaction(_ v: Int) -> Int {
@@ -465,6 +465,26 @@ extension AppState {
         return (true, nil)
     }
 
+    func satisfactionRemainingSecondsUntilNextDecay(now: Date = Date()) -> TimeInterval? {
+        let computed = computedSatisfaction(now: now)
+        let level = computed.level
+
+        guard level > 0 else { return nil }
+
+        let referenceDate: Date
+        if let effective = computed.effectiveLastUpdatedAt {
+            referenceDate = effective
+        } else if let last = satisfactionLastUpdatedAt {
+            referenceDate = last
+        } else {
+            return AppState.satisfactionDecayUnitSeconds
+        }
+
+        let elapsed = max(0, now.timeIntervalSince(referenceDate))
+        let remaining = AppState.satisfactionDecayUnitSeconds - elapsed
+        return max(0, remaining)
+    }
+
     @discardableResult
     func applySatisfactionDecayIfNeeded(now: Date = Date()) -> Int {
         ensureDailyResetIfNeeded(now: now)
@@ -494,7 +514,10 @@ extension AppState {
 
         let after = clampSatisfaction(before + 1)
         satisfactionLevel = after
-        satisfactionLastUpdatedAt = now
+
+        if satisfactionLastUpdatedAt == nil {
+            satisfactionLastUpdatedAt = now
+        }
 
         return (true, before, after, nil)
     }
@@ -506,7 +529,11 @@ extension AppState {
         guard dec > 0 else { return satisfactionLevel }
 
         satisfactionLevel = max(0, satisfactionLevel - dec)
-        satisfactionLastUpdatedAt = now
+
+        if satisfactionLastUpdatedAt == nil {
+            satisfactionLastUpdatedAt = now
+        }
+
         return satisfactionLevel
     }
 }

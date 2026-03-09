@@ -33,6 +33,7 @@ struct HomeView: View {
 
     // ✅ 満足度（表示用：0..3）
     @State private var displayedSatisfaction: Int = 0
+    @State private var satisfactionRemainingText: String = "--:--"
 
     // 目標入力（初回必須）
     @State private var showGoalSheet: Bool = false
@@ -211,6 +212,15 @@ struct HomeView: View {
         return currentBaseAssetName
     }
 
+    // ✅ 追加：撮影画面に渡す表示用メトリクス
+    private var captureMetricValues: (steps: Int, activeKcal: Int, totalKcal: Int) {
+        let steps = max(todaySteps, hk.todaySteps)
+        let total = max(todayKcal, hk.todayTotalEnergyKcal)
+        let active = max(0, hk.todayActiveEnergyKcal)
+
+        return (steps: steps, activeKcal: active, totalKcal: total)
+    }
+
     // MARK: - Layout
     fileprivate enum Layout {
         static let bannerHeight: CGFloat = 76
@@ -233,14 +243,15 @@ struct HomeView: View {
 
         static let satisfactionSpacingFromWallet: CGFloat = 16
         static let satisfactionBarWidth: CGFloat = 125
-        static let satisfactionBarHeight: CGFloat = 10
+        static let satisfactionBarHeight: CGFloat = 23
         static let satisfactionSegments: Int = 3
         static let satisfactionSegmentGap: CGFloat = 4
-        static let satisfactionCornerRadius: CGFloat = 4
+        static let satisfactionCornerRadius: CGFloat = 11
 
         static let satisfactionIconAssetName: String = "food_Icon"
         static let satisfactionIconSize: CGFloat = 24
         static let satisfactionIconSpacing: CGFloat = 10
+        static let satisfactionCountdownFont: CGFloat = 11
 
         static let kcalRingTop: CGFloat = 36
         static let kcalRingTrailing: CGFloat = 18
@@ -294,13 +305,9 @@ struct HomeView: View {
         static let lockedPopupPaddingV: CGFloat = 12
         static let lockedPopupShowSeconds: Double = 1.1
 
+        static let bathFadeInDuration: Double = 0.28
         static let bathFadeOutDuration: Double = 0.9
-        static let careSpawnCheckInterval: Double = 60.0
-
-        static let bathOverlayHorizontalPadding: CGFloat = 12
-        static let bathOverlayBottomGapFromButtons: CGFloat = 135
-        static let bathOverlayMaxWidthRatio: CGFloat = 0.92
-        static let bathOverlayMaxHeightRatio: CGFloat = 0.72
+        static let careSpawnCheckInterval: Double = 1.0
     }
 
     var body: some View {
@@ -427,7 +434,8 @@ struct HomeView: View {
                                         cornerRadius: Layout.satisfactionCornerRadius,
                                         iconAssetName: Layout.satisfactionIconAssetName,
                                         iconSize: Layout.satisfactionIconSize,
-                                        iconSpacing: Layout.satisfactionIconSpacing
+                                        iconSpacing: Layout.satisfactionIconSpacing,
+                                        countdownText: satisfactionRemainingText
                                     )
                                 }
 
@@ -482,23 +490,6 @@ struct HomeView: View {
                                     if showFoodShelf { closeFoodShelf() }
                                 }
                             )
-
-                            // 4.2) おふろフラグ前面表示
-                            if showBathOverlay || hasBathFlag {
-                                Image("yogore")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(
-                                        maxWidth: geo.size.width * Layout.bathOverlayMaxWidthRatio,
-                                        maxHeight: geo.size.height * Layout.bathOverlayMaxHeightRatio
-                                    )
-                                    .padding(.horizontal, Layout.bathOverlayHorizontalPadding)
-                                    .padding(.bottom, Layout.bottomPadding + Layout.bathOverlayBottomGapFromButtons)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                                    .opacity(bathOverlayOpacity)
-                                    .allowsHitTesting(false)
-                                    .zIndex(Layout.zBathOverlay)
-                            }
 
                             // 4.5) ごはん棚
                             if showFoodShelf {
@@ -563,6 +554,7 @@ struct HomeView: View {
                                 )
                                 .onChange(of: timeline.date) { _, newDate in
                                     displayedSatisfaction = state.currentSatisfaction(now: newDate)
+                                    updateSatisfactionCountdown(now: newDate)
                                     state.ensureDailyResetIfNeeded(now: newDate)
 
                                     state.ensureBathNextSpawnScheduled(now: newDate)
@@ -575,6 +567,7 @@ struct HomeView: View {
                                 }
                                 .onAppear {
                                     displayedSatisfaction = state.currentSatisfaction(now: now)
+                                    updateSatisfactionCountdown(now: now)
                                     state.ensureDailyResetIfNeeded(now: now)
 
                                     state.ensureBathNextSpawnScheduled(now: now)
@@ -666,6 +659,21 @@ struct HomeView: View {
                     }
                 }
             }
+            .overlay {
+                if showBathOverlay || hasBathFlag {
+                    GeometryReader { proxy in
+                        Image("yogore")
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .clipped()
+                            .ignoresSafeArea()
+                            .opacity(bathOverlayOpacity)
+                            .allowsHitTesting(false)
+                    }
+                    .ignoresSafeArea()
+                }
+            }
             .navigationBarHidden(true)
         }
         .confirmationDialog("撮影モードを選択", isPresented: $showCaptureModeDialog, titleVisibility: .visible) {
@@ -676,11 +684,19 @@ struct HomeView: View {
         .fullScreenCover(item: $selectedCaptureMode) { mode in
             CameraCaptureView(
                 initialMode: mode,
-                todaySteps: hk.todaySteps,
-                todayActiveKcal: hk.todayActiveEnergyKcal,
-                todayTotalKcal: hk.todayTotalEnergyKcal,
+                todaySteps: captureMetricValues.steps,
+                todayActiveKcal: captureMetricValues.activeKcal,
+                todayTotalKcal: captureMetricValues.totalKcal,
                 plainBackgroundAssetName: Layout.homeBackgroundAssetName,
-                characterAssetName: PetMaster.assetName(for: state.currentPetID)
+                characterAssetName: PetMaster.assetName(for: state.currentPetID),
+                metricValueProvider: {
+                    let values = captureMetricValues
+                    return (
+                        steps: values.steps,
+                        activeKcal: values.activeKcal,
+                        totalKcal: values.totalKcal
+                    )
+                }
             ) {
                 selectedCaptureMode = nil
             } onCapture: { image in
@@ -706,6 +722,7 @@ struct HomeView: View {
             displayedTodayKcal = todayKcal
             displayedWalletKcal = state.walletKcal
             displayedSatisfaction = state.currentSatisfaction(now: Date())
+            updateSatisfactionCountdown(now: Date())
 
             displayedFriendship = Double(state.friendshipPoint)
             displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
@@ -741,6 +758,7 @@ struct HomeView: View {
             displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
 
             displayedSatisfaction = state.currentSatisfaction(now: Date())
+            updateSatisfactionCountdown(now: Date())
 
             handleDayRolloverIfNeeded(state: state)
 
@@ -800,6 +818,7 @@ struct HomeView: View {
             }
 
             displayedSatisfaction = state.currentSatisfaction(now: Date())
+            updateSatisfactionCountdown(now: Date())
 
             Task { await reconcileWalletDisplayIfNeeded(state: state) }
 
@@ -881,6 +900,20 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - ✅ 満足度カウントダウン
+    private func updateSatisfactionCountdown(now: Date = Date()) {
+        guard let remaining = state.satisfactionRemainingSecondsUntilNextDecay(now: now),
+              displayedSatisfaction > 0 else {
+            satisfactionRemainingText = "--:--"
+            return
+        }
+
+        let totalSeconds = max(0, Int(ceil(remaining)))
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        satisfactionRemainingText = String(format: "%02d:%02d", minutes, seconds)
+    }
+
     // MARK: - ✅ おふろ overlay 同期
     private func syncBathOverlayFromState(animated: Bool) {
         let shouldShow = state.hasBathFlag
@@ -889,7 +922,7 @@ struct HomeView: View {
             showBathOverlay = true
 
             if animated {
-                withAnimation(.easeOut(duration: 0.25)) {
+                withAnimation(.easeOut(duration: Layout.bathFadeInDuration)) {
                     bathOverlayOpacity = 1.0
                 }
             } else {
@@ -897,10 +930,10 @@ struct HomeView: View {
             }
         } else {
             if animated {
-                withAnimation(.easeOut(duration: 0.20)) {
+                withAnimation(.easeOut(duration: Layout.bathFadeOutDuration)) {
                     bathOverlayOpacity = 0.0
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Layout.bathFadeOutDuration) {
                     if !state.hasBathFlag {
                         showBathOverlay = false
                     }
@@ -1184,6 +1217,7 @@ struct HomeView: View {
         save()
 
         displayedSatisfaction = fed.after
+        updateSatisfactionCountdown(now: Date())
         addFriendshipWithAnimation(points: gainedPoint, state: state)
 
         if isSuperFavorite {
@@ -1552,6 +1586,7 @@ struct HomeView: View {
             state.lastSyncedAt = Calendar.current.startOfDay(for: now)
             save()
             loadTodayPhoto()
+            updateSatisfactionCountdown(now: now)
             return
         }
     }
@@ -1762,6 +1797,7 @@ private struct SatisfactionMeter: View {
     let iconAssetName: String
     let iconSize: CGFloat
     let iconSpacing: CGFloat
+    let countdownText: String
 
     private var clamped: Int { min(max(0, level), maxLevel) }
 
@@ -1769,6 +1805,7 @@ private struct SatisfactionMeter: View {
         let segments = max(1, maxLevel)
         let totalGap = gap * CGFloat(max(0, segments - 1))
         let segWidth = (barWidth - totalGap) / CGFloat(segments)
+        let countdownIndex = max(0, clamped - 1)
 
         HStack(spacing: iconSpacing) {
             Image(iconAssetName)
@@ -1778,13 +1815,25 @@ private struct SatisfactionMeter: View {
 
             HStack(spacing: gap) {
                 ForEach(0..<segments, id: \.self) { idx in
-                    RoundedRectangle(cornerRadius: cornerRadius)
-                        .fill(idx < clamped ? Color.green.opacity(0.95) : Color.black.opacity(0.55))
-                        .frame(width: segWidth, height: height)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: cornerRadius)
-                                .stroke(Color.black.opacity(0.35), lineWidth: 1)
-                        )
+                    ZStack {
+                        RoundedRectangle(cornerRadius: cornerRadius)
+                            .fill(idx < clamped ? Color.green.opacity(0.95) : Color.black.opacity(0.55))
+                            .frame(width: segWidth, height: height)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: cornerRadius)
+                                    .stroke(Color.black.opacity(0.35), lineWidth: 1)
+                            )
+
+                        if clamped > 0, idx == countdownIndex {
+                            Text(countdownText)
+                                .font(.system(size: HomeView.Layout.satisfactionCountdownFont, weight: .bold))
+                                .foregroundStyle(.black)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                                .padding(.horizontal, 2)
+                        }
+                    }
                 }
             }
             .frame(width: barWidth, height: height, alignment: .leading)

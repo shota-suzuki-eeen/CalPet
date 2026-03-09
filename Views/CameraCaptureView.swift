@@ -11,11 +11,12 @@ import AVFoundation
 import ARKit
 import RealityKit
 import CoreLocation
-import Combine   // ✅ ObservableObject のために必要
+import Combine
 
 struct CameraCaptureView: View {
 
     typealias Snapshotter = (@escaping (UIImage?) -> Void) -> Void
+    typealias MetricValueProvider = () -> (steps: Int, activeKcal: Int, totalKcal: Int)
 
     enum Mode: String, Identifiable {
         case ar
@@ -100,6 +101,10 @@ struct CameraCaptureView: View {
     // 既存呼び出しを壊さないため init でデフォルト "purpor" を入れる
     let characterAssetName: String
 
+    // ✅ 追加：呼び出し元から最新値を取得するための任意クロージャ
+    //    未指定時は従来通り init 時点の値を使用する
+    let metricValueProvider: MetricValueProvider?
+
     @State private var mode: Mode
 
     @State private var characterOffset: CGSize = .zero
@@ -112,6 +117,9 @@ struct CameraCaptureView: View {
 
     // ✅ 追加：デフォルト白
     @State private var metricTextColor: MetricTextColor = .white
+
+    // ✅ 追加：ポーズ切り替え
+    @State private var isAlternatePoseEnabled: Bool = false
 
     private enum CameraPosition { case front, back }
     @State private var cameraPosition: CameraPosition = .back
@@ -134,7 +142,8 @@ struct CameraCaptureView: View {
         todayActiveKcal: Int,
         todayTotalKcal: Int,
         plainBackgroundAssetName: String,
-        characterAssetName: String = "purpor", // ✅ 互換維持
+        characterAssetName: String = "purpor",
+        metricValueProvider: MetricValueProvider? = nil,
         onCancel: @escaping () -> Void,
         onCapture: @escaping (UIImage) -> Void,
         onCaptureWithPlace: ((UIImage, String?, Double?, Double?) -> Void)? = nil
@@ -145,15 +154,38 @@ struct CameraCaptureView: View {
         self.todayTotalKcal = todayTotalKcal
         self.plainBackgroundAssetName = plainBackgroundAssetName
         self.characterAssetName = characterAssetName
+        self.metricValueProvider = metricValueProvider
         self.onCancel = onCancel
         self.onCapture = onCapture
         self.onCaptureWithPlace = onCaptureWithPlace
         _mode = State(initialValue: initialMode)
     }
 
+    // MARK: - Live Values
+
+    private var currentMetricValues: (steps: Int, activeKcal: Int, totalKcal: Int) {
+        metricValueProvider?() ?? (todaySteps, todayActiveKcal, todayTotalKcal)
+    }
+
+    private var alternateCharacterAssetName: String {
+        "\(characterAssetName)_tap_0002"
+    }
+
+    private var canUseAlternatePose: Bool {
+        UIImage(named: alternateCharacterAssetName) != nil
+    }
+
+    private var displayedCharacterAssetName: String {
+        if isAlternatePoseEnabled && canUseAlternatePose {
+            return alternateCharacterAssetName
+        }
+        return characterAssetName
+    }
+
     var body: some View {
         GeometryReader { geo in
             let characterW = min(geo.size.width * 0.45, 220)
+            let metrics = currentMetricValues
 
             ZStack {
                 Color.black.ignoresSafeArea()
@@ -169,8 +201,7 @@ struct CameraCaptureView: View {
                         updateWindowSafeArea()
                     }
 
-                // ✅ 変更：固定 "purpor" → 渡された characterAssetName
-                Image(characterAssetName)
+                Image(displayedCharacterAssetName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: characterW)
@@ -181,9 +212,9 @@ struct CameraCaptureView: View {
 
                 MetricOverlayView(
                     display: metricDisplay,
-                    steps: todaySteps,
-                    activeKcal: todayActiveKcal,
-                    totalKcal: todayTotalKcal,
+                    steps: metrics.steps,
+                    activeKcal: metrics.activeKcal,
+                    totalKcal: metrics.totalKcal,
                     textColor: metricTextColor
                 )
                 .allowsHitTesting(false)
@@ -210,6 +241,23 @@ struct CameraCaptureView: View {
                         .accessibilityLabel(metricTextColor == .white ? "文字色を黒に" : "文字色を白に")
                     }
 
+                    Button {
+                        if canUseAlternatePose {
+                            isAlternatePoseEnabled.toggle()
+                        } else {
+                            isAlternatePoseEnabled = false
+                        }
+                    } label: {
+                        IconPillButton(
+                            systemImage: isAlternatePoseEnabled ? "figure.2.and.child.holdinghands" : "figure.stand",
+                            isEnabled: canUseAlternatePose
+                        )
+                    }
+                    .disabled(!canUseAlternatePose)
+                    .accessibilityLabel(canUseAlternatePose
+                                        ? (isAlternatePoseEnabled ? "通常ポーズに切り替え" : "ポーズを切り替え")
+                                        : "切り替え可能なポーズ画像がありません")
+
                     VerticalScaleSlider(
                         value: $sliderScale,
                         sliderLength: 200,
@@ -233,6 +281,9 @@ struct CameraCaptureView: View {
             sliderScale = Double(characterScale)
             updateWindowSafeArea()
             locationProvider.prepare()
+            if !canUseAlternatePose {
+                isAlternatePoseEnabled = false
+            }
         }
         .onChange(of: sliderScale) { _, newValue in
             let clamped = max(0.4, min(2.8, newValue))
@@ -384,13 +435,15 @@ struct CameraCaptureView: View {
         guard !isCapturing else { return }
         guard let takeBackgroundSnapshot else { return }
 
+        let liveMetrics = currentMetricValues
         let fixedMetric = metricDisplay
         let fixedColor = metricTextColor
-        let fixedSteps = todaySteps
-        let fixedActive = todayActiveKcal
-        let fixedTotal = todayTotalKcal
+        let fixedSteps = liveMetrics.steps
+        let fixedActive = liveMetrics.activeKcal
+        let fixedTotal = liveMetrics.totalKcal
         let fixedOffset = characterOffset
         let fixedScale = characterScale
+        let fixedCharacterAssetName = displayedCharacterAssetName
 
         let fixedMetricImage: UIImage? = {
             guard fixedMetric != .none else { return nil }
@@ -417,20 +470,19 @@ struct CameraCaptureView: View {
             let composed = composeFinalImage(
                 background: normalizedBackground,
                 viewSize: viewSize,
-                characterAssetName: characterAssetName, // ✅ 追加
+                characterAssetName: fixedCharacterAssetName,
                 characterOffset: fixedOffset,
                 characterScale: fixedScale,
                 metricOverlayImage: fixedMetricImage
             )
 
             Task {
-                // ✅ placeName + lat/lon をまとめて取得（未許可/失敗は nil）
                 let info = await locationProvider.currentPlaceInfo(timeoutSeconds: 1.2)
                 await MainActor.run {
                     if let onCaptureWithPlace {
                         onCaptureWithPlace(composed, info.placeName, info.latitude, info.longitude)
                     } else {
-                        onCapture(composed) // 既存互換
+                        onCapture(composed)
                     }
                 }
             }
@@ -453,7 +505,6 @@ struct CameraCaptureView: View {
         let baseCharacterWidthInView = min(viewSize.width * 0.45, 220)
         let finalCharacterWidthInView = baseCharacterWidthInView * characterScale
 
-        // ✅ 変更：固定 "purpor" → 受け取った assetName
         let characterImage = UIImage(named: characterAssetName) ?? UIImage()
         let characterWidth = finalCharacterWidthInView * sx
         let aspect = characterImage.size.height / max(characterImage.size.width, 1)
@@ -731,7 +782,6 @@ private final class LocationProvider: NSObject, ObservableObject, CLLocationMana
         }
     }
 
-    /// ✅ placeName + 緯度経度をまとめて返す
     func currentPlaceInfo(timeoutSeconds: Double) async -> (placeName: String?, latitude: Double?, longitude: Double?) {
         let status = manager.authorizationStatus
         guard status == .authorizedAlways || status == .authorizedWhenInUse else {
@@ -740,7 +790,6 @@ private final class LocationProvider: NSObject, ObservableObject, CLLocationMana
 
         let deadline = Date().addingTimeInterval(timeoutSeconds)
 
-        // ✅ “古い/粗い結果”を掴み続けないため、撮影時はまず更新を促す
         manager.startUpdatingLocation()
 
         while latestLocation == nil && Date() < deadline {
@@ -781,10 +830,6 @@ private final class LocationProvider: NSObject, ObservableObject, CLLocationMana
         }
     }
 
-    /// ✅ 仕様（改善版）：
-    /// - 施設名(POI)が取れるなら最優先
-    /// - 次に「都道府県 + 市区町村」を最優先で採用（ここが重要）
-    /// - pm.name は最後の保険。ただし「本州」など汎用すぎる値は弾く
     nonisolated private static func formatPlaceName(_ pm: CLPlacemark) -> String? {
         func clean(_ s: String?) -> String? {
             guard let s else { return nil }
@@ -793,11 +838,9 @@ private final class LocationProvider: NSObject, ObservableObject, CLLocationMana
         }
 
         func isTooGeneric(_ s: String) -> Bool {
-            // ✅ 「本州」「日本」など、表示に向かない“でかい地名”を排除
             let generic: Set<String> = ["本州", "日本", "Japan", "アジア", "Asia", "東アジア", "太平洋"]
             if generic.contains(s) { return true }
 
-            // “Island / Sea / Ocean” 系など英語の雑な返りも保険で除外
             let lower = s.lowercased()
             if lower.contains("island") || lower.contains("sea") || lower.contains("ocean") {
                 return true
@@ -805,12 +848,10 @@ private final class LocationProvider: NSObject, ObservableObject, CLLocationMana
             return false
         }
 
-        // 1) POI/施設名
         if let poi = clean(pm.areasOfInterest?.first), !isTooGeneric(poi) {
             return poi
         }
 
-        // 2) まず「都道府県 + 市区町村」を最優先
         let pref = clean(pm.administrativeArea)
         let city = clean(pm.locality ?? pm.subAdministrativeArea ?? pm.subLocality)
         if let pref, let city {
@@ -818,11 +859,9 @@ private final class LocationProvider: NSObject, ObservableObject, CLLocationMana
             if !isTooGeneric(composed) { return composed }
         }
 
-        // 3) 市区町村だけ / 都道府県だけ
         if let city, !isTooGeneric(city) { return city }
         if let pref, !isTooGeneric(pref) { return pref }
 
-        // 4) 最後の保険：name（ただし “本州” などは弾く）
         if let name = clean(pm.name), !containsDigit(name), !isTooGeneric(name) {
             return name
         }
@@ -834,7 +873,6 @@ private final class LocationProvider: NSObject, ObservableObject, CLLocationMana
         s.rangeOfCharacter(from: .decimalDigits) != nil
     }
 
-    // CLLocationManagerDelegate
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
         switch status {
@@ -851,7 +889,6 @@ private final class LocationProvider: NSObject, ObservableObject, CLLocationMana
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        // 失敗は nil 扱いでOK
     }
 }
 
