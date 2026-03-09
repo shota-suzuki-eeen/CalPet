@@ -35,11 +35,20 @@ final class StepEnjoyViewModel: ObservableObject {
         state.stepEnjoyLastCheckedAt = now
         state.stepEnjoyLastDeltaSteps = safeDelta
         state.stepEnjoyTotalSteps += safeDelta
-        state.stepEnjoyDailyRewardStepBank += safeDelta
 
         deltaSteps = safeDelta
-        dayTotalSteps = await hk.fetchTodayStepTotal(now: now)
+
+        let fetchedTodayTotal = await hk.fetchTodayStepTotal(now: now)
+        let resolvedTodayTotal = max(state.cachedTodaySteps, hk.todaySteps, fetchedTodayTotal)
+        dayTotalSteps = max(0, resolvedTodayTotal)
+
         weekTotalSteps = await hk.fetchWeekStepTotal(now: now)
+
+        // ✅ 今日の実歩数を正として、未受取ぶんの bank を再同期する
+        state.stepEnjoyDailyRewardStepBank = StepEnjoyRewardPolicy.bank(
+            totalWalkedSteps: dayTotalSteps,
+            claimedToday: state.stepEnjoyDailyRewardCount
+        )
 
         claimableCount = StepEnjoyRewardPolicy.claimableCount(
             bank: state.stepEnjoyDailyRewardStepBank,
@@ -69,9 +78,14 @@ final class StepEnjoyViewModel: ObservableObject {
 
         guard claimable >= 1 else { return }
 
-        state.stepEnjoyDailyRewardStepBank -= StepEnjoyRewardPolicy.rewardStepThreshold
         state.stepEnjoyDailyRewardCount += 1
         state.stepEnjoyLastRewardAt = Date()
+
+        // ✅ 受け取り後も「今日の実歩数」を正として bank を再計算
+        state.stepEnjoyDailyRewardStepBank = StepEnjoyRewardPolicy.bank(
+            totalWalkedSteps: dayTotalSteps,
+            claimedToday: state.stepEnjoyDailyRewardCount
+        )
 
         if let reward = FoodCatalog.all.randomElement() {
             _ = state.addFood(foodId: reward.id, count: 1)

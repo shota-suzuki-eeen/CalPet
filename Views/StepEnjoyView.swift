@@ -45,13 +45,17 @@ struct StepEnjoyView: View {
         StepEnjoyRewardPolicy.dailyRewardMaxCount
     }
 
+    /// ✅ CameraCaptureView 側と揃えるための「今日の合計歩数」
+    /// - hk.todaySteps を優先
+    /// - 未反映/0 のときは state のキャッシュも保険で使う
+    private var unifiedTodayTotalSteps: Int {
+        max(hk.todaySteps, state.cachedTodaySteps)
+    }
+
     /// ✅ 表示用進捗
-    /// - bank は「未請求ぶん」なので、claimed * 2000 を足して “今日ここまで進んだ量” を出す
+    /// - 「今日歩いた実歩数」を正として扱う
     private var progressStepsForMeter: Int {
-        min(
-            StepEnjoyRewardPolicy.dailyRewardStepCap,
-            max(0, state.stepEnjoyDailyRewardStepBank + (state.stepEnjoyDailyRewardCount * rewardThreshold))
-        )
+        StepEnjoyRewardPolicy.cappedProgressSteps(from: displayedDayTotalSteps)
     }
 
     var body: some View {
@@ -231,9 +235,10 @@ struct StepEnjoyView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.orange)
             } else {
-                let nextIndex = min(state.stepEnjoyDailyRewardCount + 1, rewardMaxCount)
-                let nextBorder = nextIndex * rewardThreshold
-                let remaining = max(0, nextBorder - progressStepsForMeter)
+                let remaining = StepEnjoyRewardPolicy.nextRewardRemainingSteps(
+                    totalWalkedSteps: displayedDayTotalSteps,
+                    claimedToday: state.stepEnjoyDailyRewardCount
+                )
 
                 Text("次のプレゼントまであと \(remaining) 歩")
                     .font(.system(size: 13, weight: .semibold))
@@ -352,15 +357,19 @@ struct StepEnjoyView: View {
     private func refreshOnAppear() async {
         viewModel.gainedFoodName = nil
 
-        let beforeTotal = max(0, await hk.fetchTodayStepTotal(now: Date()))
+        let fetchedBeforeTotal = max(0, await hk.fetchTodayStepTotal(now: Date()))
+        let beforeTotal = max(unifiedTodayTotalSteps, fetchedBeforeTotal)
         displayedDayTotalSteps = beforeTotal
 
         await viewModel.refresh(state: state, hk: hk, save: onSave)
 
         let delta = max(0, viewModel.deltaSteps)
-        let finalTotal = max(0, viewModel.dayTotalSteps)
-        let startValue = max(0, finalTotal - delta)
 
+        // ✅ StepEnjoy側も CameraCaptureView 側も「今日の合計歩数」でそろえる
+        let fetchedFinalTotal = max(0, await hk.fetchTodayStepTotal(now: Date()))
+        let finalTotal = max(unifiedTodayTotalSteps, viewModel.dayTotalSteps, fetchedFinalTotal)
+
+        let startValue = max(0, finalTotal - delta)
         displayedDayTotalSteps = startValue
 
         if delta > 0 {

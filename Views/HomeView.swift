@@ -305,8 +305,10 @@ struct HomeView: View {
         static let lockedPopupPaddingV: CGFloat = 12
         static let lockedPopupShowSeconds: Double = 1.1
 
-        static let bathFadeInDuration: Double = 0.28
-        static let bathFadeOutDuration: Double = 0.9
+        // ✅ yogore をゆっくりめに表示 / 非表示
+        static let bathFadeInDuration: Double = 0.95
+        static let bathFadeOutDuration: Double = 1.15
+
         static let careSpawnCheckInterval: Double = 1.0
     }
 
@@ -919,29 +921,37 @@ struct HomeView: View {
         let shouldShow = state.hasBathFlag
 
         if shouldShow {
-            showBathOverlay = true
+            if !showBathOverlay {
+                showBathOverlay = true
+            }
 
             if animated {
-                withAnimation(.easeOut(duration: Layout.bathFadeInDuration)) {
+                guard bathOverlayOpacity < 0.999 else { return }
+                withAnimation(.easeInOut(duration: Layout.bathFadeInDuration)) {
                     bathOverlayOpacity = 1.0
                 }
             } else {
                 bathOverlayOpacity = 1.0
             }
-        } else {
-            if animated {
-                withAnimation(.easeOut(duration: Layout.bathFadeOutDuration)) {
+            return
+        }
+
+        guard showBathOverlay || bathOverlayOpacity > 0.001 else { return }
+
+        if animated {
+            withAnimation(.easeInOut(duration: Layout.bathFadeOutDuration)) {
+                bathOverlayOpacity = 0.0
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + Layout.bathFadeOutDuration) {
+                if !state.hasBathFlag {
+                    showBathOverlay = false
                     bathOverlayOpacity = 0.0
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + Layout.bathFadeOutDuration) {
-                    if !state.hasBathFlag {
-                        showBathOverlay = false
-                    }
-                }
-            } else {
-                bathOverlayOpacity = 0.0
-                showBathOverlay = false
             }
+        } else {
+            bathOverlayOpacity = 0.0
+            showBathOverlay = false
         }
     }
 
@@ -999,8 +1009,6 @@ struct HomeView: View {
             save()
             syncBathOverlayFromState(animated: true)
             toast("よごれちゃった！")
-        } else {
-            syncBathOverlayFromState(animated: false)
         }
     }
 
@@ -1526,7 +1534,7 @@ struct HomeView: View {
         guard !isBathCleaningAnimationRunning else { return }
         isBathCleaningAnimationRunning = true
 
-        withAnimation(.easeOut(duration: Layout.bathFadeOutDuration)) {
+        withAnimation(.easeInOut(duration: Layout.bathFadeOutDuration)) {
             bathOverlayOpacity = 0.0
         }
 
