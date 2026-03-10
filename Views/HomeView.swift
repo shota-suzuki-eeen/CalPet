@@ -9,6 +9,9 @@ import SwiftUI
 import SwiftData
 import UIKit
 import UniformTypeIdentifiers
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
@@ -726,6 +729,7 @@ struct HomeView: View {
             updateToiletWiggle()
             syncBathOverlayFromState(animated: false)
             syncCharacterBaseFromState(force: true)
+            updateWidgetSnapshot()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             state.ensureInitialPetsIfNeeded()
@@ -760,6 +764,7 @@ struct HomeView: View {
                 updateToiletWiggle()
                 syncBathOverlayFromState(animated: false)
                 syncCharacterBaseFromState(force: true)
+                updateWidgetSnapshot()
             }
         }
         .sheet(isPresented: $showGoalSheet) {
@@ -829,6 +834,7 @@ struct HomeView: View {
         }
         .onChange(of: state.currentPetID) { _, _ in
             syncCharacterBaseFromState(force: true)
+            updateWidgetSnapshot()
         }
         .onChange(of: isDropTargeted) { _, newValue in
             if newValue {
@@ -844,9 +850,11 @@ struct HomeView: View {
         .onChange(of: state.toiletFlagAt) { _, _ in
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
+            updateWidgetSnapshot()
         }
         .onChange(of: state.bathFlagAt) { _, _ in
             syncBathOverlayFromState(animated: true)
+            updateWidgetSnapshot()
         }
     }
 
@@ -1570,9 +1578,23 @@ struct HomeView: View {
     private func save() {
         do {
             try modelContext.save()
+            updateWidgetSnapshot()
         } catch {
             print("❌ modelContext.save() failed:", error)
         }
+    }
+
+    private func updateWidgetSnapshot() {
+        let snapshot = WidgetPetSnapshotPublisher.makeSnapshot(
+            state: state,
+            todaySteps: max(todaySteps, state.cachedTodaySteps),
+            now: Date()
+        )
+        WidgetPetSnapshotStore.save(snapshot)
+
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadTimelines(ofKind: "CalPetMediumWidget")
+        #endif
     }
 
     private func handleDayRolloverIfNeeded(state: AppState) {
@@ -1639,6 +1661,7 @@ struct HomeView: View {
         }
 
         syncCharacterBaseFromState(force: true)
+        updateWidgetSnapshot()
     }
 
     private func playGainAnimationIfNeeded(
