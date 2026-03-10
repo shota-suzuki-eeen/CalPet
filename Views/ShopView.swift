@@ -11,6 +11,8 @@ import UIKit
 
 struct ShopView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var bgmManager: BGMManager
+
     let state: AppState
     @StateObject private var viewModel = ShopViewModel()
 
@@ -59,6 +61,7 @@ struct ShopView: View {
                 PurchasePopupOverlay(
                     popup: $popup,
                     onConfirmBuy: { item in
+                        bgmManager.playSE(.buy)
                         viewModel.buyFood(itemID: item.id, state: state)
                         save()
                         popup = .none
@@ -113,6 +116,8 @@ struct ShopView: View {
     private func onTapBuy(_ item: ShopFoodItem) {
         guard item.stock > 0 else { return }
 
+        bgmManager.playSE(.push)
+
         guard state.walletKcal >= item.kcal else {
             dismissInsufficientTask?.cancel()
             popup = .insufficient
@@ -136,6 +141,7 @@ struct ShopView: View {
 
     // ✅ 置き換え：広告視聴でリセット（Reward_food）
     private func requestRewardResetByAd() {
+        bgmManager.playSE(.push)
         Haptics.tap(style: .light)
 
         // もう上限なら何もしない（UIでもdisabledだが保険）
@@ -221,6 +227,8 @@ private struct ShopWalletHeader: View {
 // MARK: - Popup overlay
 
 private struct PurchasePopupOverlay: View {
+    @EnvironmentObject private var bgmManager: BGMManager
+
     @Binding var popup: PurchasePopupState
     let onConfirmBuy: (ShopFoodItem) -> Void
 
@@ -229,7 +237,10 @@ private struct PurchasePopupOverlay: View {
             // 背景（タップで閉じる）
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
-                .onTapGesture { popup = .none }
+                .onTapGesture {
+                    bgmManager.playSE(.push)
+                    popup = .none
+                }
 
             switch popup {
             case .none:
@@ -244,7 +255,10 @@ private struct PurchasePopupOverlay: View {
                     .padding(.vertical, 14)
                     .background(Color.black.opacity(0.85))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .onTapGesture { popup = .none }
+                    .onTapGesture {
+                        bgmManager.playSE(.push)
+                        popup = .none
+                    }
 
             case .confirm(let item):
                 VStack(spacing: 14) {
@@ -256,6 +270,7 @@ private struct PurchasePopupOverlay: View {
 
                     HStack(spacing: 12) {
                         Button("キャンセル") {
+                            bgmManager.playSE(.push)
                             popup = .none
                             Haptics.tap(style: .light)
                         }
@@ -263,6 +278,7 @@ private struct PurchasePopupOverlay: View {
                         .tint(.white.opacity(0.85))
 
                         Button("購入") {
+                            bgmManager.playSE(.push)
                             onConfirmBuy(item)
                             Haptics.tap(style: .medium)
                         }
@@ -347,10 +363,12 @@ private struct DailyShopCard: View {
                                 .background(.ultraThinMaterial)
                                 .clipShape(Capsule())
 
-                            Button("購入") { onBuyTap(item) }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(item.stock == 0)
-                                .opacity(item.stock == 0 ? 0.6 : 1.0)
+                            Button("購入") {
+                                onBuyTap(item)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(item.stock == 0)
+                            .opacity(item.stock == 0 ? 0.6 : 1.0)
                         }
                         .padding()
                         .background(.ultraThinMaterial)
@@ -360,9 +378,11 @@ private struct DailyShopCard: View {
             }
 
             HStack(spacing: 10) {
-                Button("広告でリセット") { onRewardReset() }
-                    .buttonStyle(.bordered)
-                    .disabled(rewardResetsToday >= maxRewardResetsPerDay)
+                Button("広告でリセット") {
+                    onRewardReset()
+                }
+                .buttonStyle(.bordered)
+                .disabled(rewardResetsToday >= maxRewardResetsPerDay)
             }
 
             Text("※ リセットで「再抽選＋全在庫1に戻す」")

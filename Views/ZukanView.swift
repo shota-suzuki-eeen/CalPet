@@ -11,6 +11,7 @@ import SwiftData
 struct ZukanView: View {
     @Query private var appStates: [AppState]
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var bgmManager: BGMManager
 
     private var state: AppState? { appStates.first }
 
@@ -94,6 +95,8 @@ struct ZukanView: View {
 
     // ✅ 追加：ボタン押下ハンドラ（広告→切替）
     private func handleTrainTapped(state: AppState, id: String) {
+        bgmManager.playSE(.push)
+
         let switchPet: () -> Void = {
             state.currentPetID = id
             selectedPetID = id
@@ -126,6 +129,8 @@ struct ZukanView: View {
 // MARK: - Grid
 
 private struct ZukanGrid: View {
+    @EnvironmentObject private var bgmManager: BGMManager
+
     let petIDs: [String]
     let ownedIDs: Set<String>
     let currentPetID: String
@@ -147,6 +152,7 @@ private struct ZukanGrid: View {
                         isSelected: (selectedPetID == id),
                         onTap: {
                             guard isOwned else { return }
+                            bgmManager.playSE(.push)
                             onSelect(id)
                         }
                     )

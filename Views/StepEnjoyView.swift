@@ -9,6 +9,7 @@ import SwiftUI
 
 struct StepEnjoyView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var bgmManager: BGMManager
 
     let state: AppState
     @ObservedObject var hk: HealthKitManager
@@ -118,12 +119,14 @@ struct StepEnjoyView: View {
                     RewardClaimPopup(
                         rewardIndex: rewardIndex,
                         onClose: {
+                            bgmManager.playSE(.push)
                             withAnimation(.easeInOut(duration: 0.18)) {
                                 showRewardPopup = false
                                 selectedRewardIndex = nil
                             }
                         },
                         onNormalReward: {
+                            bgmManager.playSE(.push)
                             viewModel.claimNormalReward(state: state, save: onSave)
                             Haptics.notify(.success)
 
@@ -133,6 +136,8 @@ struct StepEnjoyView: View {
                             }
                         },
                         onAdReward: {
+                            bgmManager.playSE(.push)
+
                             guard rewardedAd.isReady else {
                                 rewardedAd.load()
                                 return
@@ -189,9 +194,12 @@ struct StepEnjoyView: View {
         HStack {
             Spacer()
 
-            Button("とじる") { dismiss() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
+            Button("とじる") {
+                bgmManager.playSE(.push)
+                dismiss()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
         }
         .padding(.horizontal, 18)
     }
@@ -311,6 +319,7 @@ struct StepEnjoyView: View {
 
         Button {
             guard isAvailableNow else { return }
+            bgmManager.playSE(.push)
             selectedRewardIndex = index
             withAnimation(.easeInOut(duration: 0.18)) {
                 showRewardPopup = true

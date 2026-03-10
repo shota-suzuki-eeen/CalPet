@@ -182,6 +182,10 @@ struct CameraCaptureView: View {
         return characterAssetName
     }
 
+    private var poseToggleSystemImage: String {
+        isAlternatePoseEnabled ? "figure.wave" : "figure.stand"
+    }
+
     var body: some View {
         GeometryReader { geo in
             let characterW = min(geo.size.width * 0.45, 220)
@@ -249,7 +253,7 @@ struct CameraCaptureView: View {
                         }
                     } label: {
                         IconPillButton(
-                            systemImage: isAlternatePoseEnabled ? "figure.2.and.child.holdinghands" : "figure.stand",
+                            systemImage: poseToggleSystemImage,
                             isEnabled: canUseAlternatePose
                         )
                     }

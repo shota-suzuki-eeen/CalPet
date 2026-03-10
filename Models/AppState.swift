@@ -320,7 +320,7 @@ extension AppState {
         let todayKey = AppState.makeDayKey(now)
         guard lastDayKey != todayKey else { return }
 
-        if satisfactionLastUpdatedAt == nil {
+        if satisfactionLastUpdatedAt == nil, satisfactionLevel > 0 {
             satisfactionLastUpdatedAt = now
         }
 
@@ -432,6 +432,10 @@ extension AppState {
     private func computedSatisfaction(now: Date = Date()) -> (level: Int, effectiveLastUpdatedAt: Date?) {
         let current = clampSatisfaction(satisfactionLevel)
 
+        guard current > 0 else {
+            return (0, nil)
+        }
+
         guard let last = satisfactionLastUpdatedAt else {
             return (current, nil)
         }
@@ -447,6 +451,10 @@ extension AppState {
         }
 
         let after = clampSatisfaction(current - steps)
+        if after <= 0 {
+            return (0, nil)
+        }
+
         let advanced = TimeInterval(steps) * AppState.satisfactionDecayUnitSeconds
         let effLast = last.addingTimeInterval(advanced)
 
@@ -489,17 +497,31 @@ extension AppState {
     func applySatisfactionDecayIfNeeded(now: Date = Date()) -> Int {
         ensureDailyResetIfNeeded(now: now)
 
+        satisfactionLevel = clampSatisfaction(satisfactionLevel)
+
+        guard satisfactionLevel > 0 else {
+            satisfactionLastUpdatedAt = nil
+            return 0
+        }
+
         guard satisfactionLastUpdatedAt != nil else {
             satisfactionLastUpdatedAt = now
-            satisfactionLevel = clampSatisfaction(satisfactionLevel)
             return satisfactionLevel
         }
 
         let computed = computedSatisfaction(now: now)
         satisfactionLevel = clampSatisfaction(computed.level)
+
+        if satisfactionLevel <= 0 {
+            satisfactionLevel = 0
+            satisfactionLastUpdatedAt = nil
+            return 0
+        }
+
         if let eff = computed.effectiveLastUpdatedAt {
             satisfactionLastUpdatedAt = eff
         }
+
         return satisfactionLevel
     }
 
@@ -515,7 +537,10 @@ extension AppState {
         let after = clampSatisfaction(before + 1)
         satisfactionLevel = after
 
-        if satisfactionLastUpdatedAt == nil {
+        // ✅ 満足度 0 → 1 へ回復した瞬間を必ず新しい起点にする
+        if before == 0 {
+            satisfactionLastUpdatedAt = now
+        } else if satisfactionLastUpdatedAt == nil {
             satisfactionLastUpdatedAt = now
         }
 
@@ -530,7 +555,9 @@ extension AppState {
 
         satisfactionLevel = max(0, satisfactionLevel - dec)
 
-        if satisfactionLastUpdatedAt == nil {
+        if satisfactionLevel == 0 {
+            satisfactionLastUpdatedAt = nil
+        } else if satisfactionLastUpdatedAt == nil {
             satisfactionLastUpdatedAt = now
         }
 

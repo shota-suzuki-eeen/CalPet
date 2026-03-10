@@ -12,6 +12,8 @@ struct MojaView: View {
     let state: AppState
 
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var bgmManager: BGMManager
+
     @StateObject private var viewModel = MojaViewModel()
 
     // ✅ リワード広告（Reward_moja）
@@ -83,9 +85,12 @@ struct MojaView: View {
 
                 // ③ ボタン
                 Button {
+                    bgmManager.playSE(.push)
+
                     if viewModel.fusionIsReadyToClaim {
                         // ✅ 新キャラ獲得 + 状態リセット + ポップアップ表示
                         viewModel.claimNewPet(state: state)
+                        bgmManager.playSE(.crap)
                         save()
                         return
                     }
@@ -167,11 +172,13 @@ struct MojaView: View {
                 RewardPopup(
                     petAssetName: PetMaster.assetName(for: petID),
                     onClose: {
+                        bgmManager.playSE(.push)
                         withAnimation(.easeOut(duration: 0.15)) {
                             viewModel.showRewardPopup = false
                         }
                     },
                     onGoNow: {
+                        bgmManager.playSE(.push)
                         withAnimation(.easeOut(duration: 0.15)) {
                             viewModel.showRewardPopup = false
                         }

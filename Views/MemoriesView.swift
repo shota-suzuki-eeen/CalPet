@@ -127,6 +127,8 @@ struct MemoriesView: View {
         }
     }
 
+    @EnvironmentObject private var bgmManager: BGMManager
+
     @Query(sort: \TodayPhotoEntry.date, order: .reverse) private var entries: [TodayPhotoEntry]
     @StateObject private var viewModel = MemoriesViewModel()
     @StateObject private var placeResolver = PlaceNameResolver()
@@ -250,7 +252,12 @@ struct MemoriesView: View {
         VStack(spacing: 10) {
             HStack {
                 if mode != .day {
-                    Button { shiftRange(-1) } label: { Image(systemName: "chevron.left") }
+                    Button {
+                        bgmManager.playSE(.push)
+                        shiftRange(-1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
                 } else {
                     Image(systemName: "chevron.left").opacity(0)
                 }
@@ -263,7 +270,12 @@ struct MemoriesView: View {
                 Spacer()
 
                 if mode != .day {
-                    Button { shiftRange(1) } label: { Image(systemName: "chevron.right") }
+                    Button {
+                        bgmManager.playSE(.push)
+                        shiftRange(1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                    }
                 } else {
                     Image(systemName: "chevron.right").opacity(0)
                 }
@@ -277,6 +289,9 @@ struct MemoriesView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .onChange(of: mode) { _, _ in
+                bgmManager.playSE(.push)
+            }
         }
         .padding(.top, 8)
     }
@@ -369,6 +384,7 @@ struct MemoriesView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
+            bgmManager.playSE(.push)
             // ✅ タップした写真を起点に、同日の写真を左右スワイプで見れる（詳細は DayPhotosView 側で対応）
             sheetItem = DayPhotosSheetItem(
                 dayKey: e.dayKey,
@@ -475,6 +491,7 @@ struct MemoriesView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             guard let entry else { return }
+            bgmManager.playSE(.push)
             sheetItem = DayPhotosSheetItem(
                 dayKey: key,
                 initialFileName: nil,

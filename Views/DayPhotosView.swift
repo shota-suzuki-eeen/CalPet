@@ -18,6 +18,7 @@ struct DayPhotosView: View {
     let onToast: (String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var bgmManager: BGMManager
 
     @Query private var dayEntries: [TodayPhotoEntry]
 
@@ -77,6 +78,8 @@ struct DayPhotosView: View {
                                             timeText: viewModel.timeText(for: e.date),
                                             placeTitleText: placeTitleText(for: e),
                                             onDownload: { img in
+                                                bgmManager.playSE(.push)
+
                                                 Task {
                                                     do {
                                                         try await viewModel.saveToPhotos(img)
@@ -127,7 +130,10 @@ struct DayPhotosView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("閉じる") { dismiss() }
+                    Button("閉じる") {
+                        bgmManager.playSE(.push)
+                        dismiss()
+                    }
                 }
             }
         }

@@ -11,6 +11,7 @@ import UIKit
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var bgmManager: BGMManager
     @Query private var appStates: [AppState]
 
     @State private var goalText: String = ""
@@ -68,6 +69,7 @@ struct SettingsView: View {
                                 Spacer()
 
                                 Button("編集") {
+                                    bgmManager.playSE(.push)
                                     errorMessage = nil
                                     goalText = state.dailyGoalKcal > 0 ? String(state.dailyGoalKcal) : ""
                                     withAnimation(.easeInOut(duration: 0.15)) {
@@ -85,11 +87,13 @@ struct SettingsView: View {
                                     .textFieldStyle(.roundedBorder)
 
                                 Button("保存") {
+                                    bgmManager.playSE(.push)
                                     saveGoal(state: state)
                                 }
                                 .buttonStyle(.borderedProminent)
 
                                 Button("キャンセル") {
+                                    bgmManager.playSE(.push)
                                     errorMessage = nil
                                     goalText = state.dailyGoalKcal > 0 ? String(state.dailyGoalKcal) : ""
                                     withAnimation(.easeInOut(duration: 0.15)) {

@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var bgmManager: BGMManager
 
     // ✅ Rootから渡された“同一のAppState”を使う
     let state: AppState
@@ -66,8 +67,6 @@ struct HomeView: View {
     @State private var showMojaOverlay: Bool = false
     @State private var rewardScale: CGFloat = 0.8
     @State private var rewardOpacity: Double = 0.0
-    @State private var getOpacity: Double = 0.0
-    @State private var getRotation: Double = 0.0
 
     // ✅ ごはん棚
     @State private var showFoodShelf: Bool = false
@@ -267,9 +266,9 @@ struct HomeView: View {
         static let rightButtonsSpacing: CGFloat = 18
 
         static let bottomButtonSize: CGFloat = 60
-        static let bottomButtonsSpacing: CGFloat = 14
+        static let bottomButtonsSpacing: CGFloat = 22
         static let bottomPadding: CGFloat = 80
-        static let bottomHorizontalPadding: CGFloat = 14
+        static let bottomHorizontalPadding: CGFloat = 20
 
         static let foodShelfHeight: CGFloat = 45
         static let foodShelfHorizontalPadding: CGFloat = 18
@@ -277,13 +276,10 @@ struct HomeView: View {
         static let foodItemSize: CGFloat = 64
 
         static let rewardMaxWidth: CGFloat = 220
-        static let getMaxWidth: CGFloat = 240
         static let getTextMaxWidth: CGFloat = 200
 
         static let getTextOffsetX: CGFloat = 11
         static let getTextOffsetY: CGFloat = -160
-
-        static let getRotationDuration: Double = 2.2
 
         static let kcalCenterCurrentFont: CGFloat = 18
         static let kcalCenterGoalFont: CGFloat = 12
@@ -510,16 +506,8 @@ struct HomeView: View {
                                 let canFood = true
                                 let canBath = hasBathFlag
                                 let canWc = true
-                                let canSleep = true
 
                                 BottomButtons(
-                                    onSleep: {
-                                        if isToiletLocked {
-                                            showToiletLockedMessage()
-                                            return
-                                        }
-                                        addFriendshipWithAnimation(points: 5, state: state)
-                                    },
                                     onBath: {
                                         if isToiletLocked {
                                             showToiletLockedMessage()
@@ -537,14 +525,13 @@ struct HomeView: View {
                                     onWc: {
                                         onTapToilet(state: state)
                                     },
-                                    onHome: {
+                                    onStep: {
                                         if isToiletLocked {
                                             showToiletLockedMessage()
                                             return
                                         }
-                                        showStepEnjoy = true
+                                        onTapStep()
                                     },
-                                    isSleepAvailable: canSleep,
                                     isBathAvailable: canBath,
                                     isFoodAvailable: canFood,
                                     isWcAvailable: canWc,
@@ -599,22 +586,6 @@ struct HomeView: View {
                                         .onTapGesture { dismissMojaOverlay() }
 
                                     ZStack {
-                                        ZStack {
-                                            Image("get_a")
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(maxWidth: min(geo.size.width * 0.78, Layout.getMaxWidth))
-                                                .opacity(getOpacity)
-                                                .rotationEffect(.degrees(getRotation))
-
-                                            Image("get_b")
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(maxWidth: min(geo.size.width * 0.78, Layout.getMaxWidth))
-                                                .opacity(getOpacity)
-                                                .rotationEffect(.degrees(getRotation * 0.85))
-                                        }
-
                                         Image("moja")
                                             .resizable()
                                             .scaledToFit()
@@ -679,9 +650,17 @@ struct HomeView: View {
             .navigationBarHidden(true)
         }
         .confirmationDialog("撮影モードを選択", isPresented: $showCaptureModeDialog, titleVisibility: .visible) {
-            Button("ARで撮影") { selectedCaptureMode = .ar }
-            Button("通常撮影") { selectedCaptureMode = .plain }
-            Button("キャンセル", role: .cancel) {}
+            Button("ARで撮影") {
+                bgmManager.playSE(.push)
+                selectedCaptureMode = .ar
+            }
+            Button("通常撮影") {
+                bgmManager.playSE(.push)
+                selectedCaptureMode = .plain
+            }
+            Button("キャンセル", role: .cancel) {
+                bgmManager.playSE(.push)
+            }
         }
         .fullScreenCover(item: $selectedCaptureMode) { mode in
             CameraCaptureView(
@@ -802,7 +781,6 @@ struct HomeView: View {
                     showGoalSheet = false
                 }
             )
-            .presentationDetents([.medium])
         }
         .fullScreenCover(isPresented: $showStepEnjoy) {
             NavigationStack {
@@ -1227,6 +1205,7 @@ struct HomeView: View {
         displayedSatisfaction = fed.after
         updateSatisfactionCountdown(now: Date())
         addFriendshipWithAnimation(points: gainedPoint, state: state)
+        playFeedSound(isSuperFavorite: isSuperFavorite)
 
         if isSuperFavorite {
             toast("\(food.name)をあげた！ 大好物だ！ +\(gainedPoint)")
@@ -1279,6 +1258,17 @@ struct HomeView: View {
                 characterAssetName = preferredCharacterRestAssetName
                 isCharacterActionRunning = false
             }
+        }
+    }
+
+    private func playFeedSound(isSuperFavorite: Bool) {
+        bgmManager.playSE(.eat)
+
+        guard isSuperFavorite else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            bgmManager.playSE(.love)
         }
     }
 
@@ -1380,8 +1370,6 @@ struct HomeView: View {
         showMojaOverlay = false
         rewardScale = 0.8
         rewardOpacity = 0.0
-        getOpacity = 0.0
-        getRotation = 0.0
 
         withAnimation(.easeOut(duration: 0.12)) {
             showMojaOverlay = true
@@ -1392,25 +1380,18 @@ struct HomeView: View {
         }
         withAnimation(.easeOut(duration: 0.18)) {
             rewardOpacity = 1.0
-            getOpacity = 1.0
-        }
-
-        withAnimation(.linear(duration: Layout.getRotationDuration).repeatForever(autoreverses: false)) {
-            getRotation = 360
         }
     }
 
     private func dismissMojaOverlay() {
         withAnimation(.easeInOut(duration: 0.18)) {
             rewardOpacity = 0.0
-            getOpacity = 0.0
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             withAnimation(.easeOut(duration: 0.12)) {
                 showMojaOverlay = false
             }
             rewardScale = 0.8
-            getRotation = 0.0
         }
     }
 
@@ -1534,6 +1515,8 @@ struct HomeView: View {
         guard !isBathCleaningAnimationRunning else { return }
         isBathCleaningAnimationRunning = true
 
+        bgmManager.playSE(.bath)
+
         withAnimation(.easeInOut(duration: Layout.bathFadeOutDuration)) {
             bathOverlayOpacity = 0.0
         }
@@ -1554,6 +1537,7 @@ struct HomeView: View {
 
     private func onTapToilet(state: AppState) {
         if state.toiletFlagAt != nil {
+            bgmManager.playSE(.wc)
             resolveToilet(state: state)
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
@@ -1563,6 +1547,11 @@ struct HomeView: View {
         Task { @MainActor in
             Haptics.rattle(duration: 0.18, style: .light)
         }
+    }
+
+    private func onTapStep() {
+        bgmManager.playSE(.open)
+        showStepEnjoy = true
     }
 
     private func resolveToilet(state: AppState) {
@@ -1926,6 +1915,8 @@ private struct KcalRing: View {
 }
 
 private struct RightSideButtons: View {
+    @EnvironmentObject private var bgmManager: BGMManager
+
     let state: AppState
     let onCamera: () -> Void
 
@@ -1937,7 +1928,10 @@ private struct RightSideButtons: View {
 
     var body: some View {
         VStack(spacing: spacing) {
-            Button(action: onCamera) {
+            Button(action: {
+                bgmManager.playSE(.push)
+                onCamera()
+            }) {
                 Image("camera_button")
                     .resizable()
                     .scaledToFit()
@@ -1945,7 +1939,10 @@ private struct RightSideButtons: View {
             }
 
             if isToiletLocked {
-                Button(action: onBlocked) {
+                Button(action: {
+                    bgmManager.playSE(.push)
+                    onBlocked()
+                }) {
                     Image("omoide_button")
                         .resizable()
                         .scaledToFit()
@@ -1959,10 +1956,16 @@ private struct RightSideButtons: View {
                         .scaledToFit()
                         .frame(width: buttonSize, height: buttonSize)
                 }
+                .simultaneousGesture(TapGesture().onEnded {
+                    bgmManager.playSE(.push)
+                })
             }
 
             if isToiletLocked {
-                Button(action: onBlocked) {
+                Button(action: {
+                    bgmManager.playSE(.push)
+                    onBlocked()
+                }) {
                     Image("moja")
                         .resizable()
                         .scaledToFit()
@@ -1976,10 +1979,16 @@ private struct RightSideButtons: View {
                         .scaledToFit()
                         .frame(width: buttonSize, height: buttonSize)
                 }
+                .simultaneousGesture(TapGesture().onEnded {
+                    bgmManager.playSE(.push)
+                })
             }
 
             if isToiletLocked {
-                Button(action: onBlocked) {
+                Button(action: {
+                    bgmManager.playSE(.push)
+                    onBlocked()
+                }) {
                     Image("picture_button")
                         .resizable()
                         .scaledToFit()
@@ -1993,10 +2002,16 @@ private struct RightSideButtons: View {
                         .scaledToFit()
                         .frame(width: buttonSize, height: buttonSize)
                 }
+                .simultaneousGesture(TapGesture().onEnded {
+                    bgmManager.playSE(.push)
+                })
             }
 
             if isToiletLocked {
-                Button(action: onBlocked) {
+                Button(action: {
+                    bgmManager.playSE(.push)
+                    onBlocked()
+                }) {
                     Image("shop_button")
                         .resizable()
                         .scaledToFit()
@@ -2010,10 +2025,16 @@ private struct RightSideButtons: View {
                         .scaledToFit()
                         .frame(width: buttonSize, height: buttonSize)
                 }
+                .simultaneousGesture(TapGesture().onEnded {
+                    bgmManager.playSE(.push)
+                })
             }
 
             if isToiletLocked {
-                Button(action: onBlocked) {
+                Button(action: {
+                    bgmManager.playSE(.push)
+                    onBlocked()
+                }) {
                     Image("option_button")
                         .resizable()
                         .scaledToFit()
@@ -2027,19 +2048,22 @@ private struct RightSideButtons: View {
                         .scaledToFit()
                         .frame(width: buttonSize, height: buttonSize)
                 }
+                .simultaneousGesture(TapGesture().onEnded {
+                    bgmManager.playSE(.push)
+                })
             }
         }
     }
 }
 
 private struct BottomButtons: View {
-    let onSleep: () -> Void
+    @EnvironmentObject private var bgmManager: BGMManager
+
     let onBath: () -> Void
     let onFood: () -> Void
     let onWc: () -> Void
-    let onHome: () -> Void
+    let onStep: () -> Void
 
-    let isSleepAvailable: Bool
     let isBathAvailable: Bool
     let isFoodAvailable: Bool
     let isWcAvailable: Bool
@@ -2051,43 +2075,59 @@ private struct BottomButtons: View {
     let spacing: CGFloat
     let horizontalPadding: CGFloat
 
-    private var sleepImageName: String { isSleepAvailable ? "sleep_button_on" : "sleep_button" }
     private var bathImageName: String { isBathAvailable ? "bath_button_on" : "bath_button" }
     private var foodImageName: String { isFoodAvailable ? "food_button_on" : "food_button" }
     private var wcImageName: String { isToiletLocked ? "wc_button_on" : "wc_button" }
 
     var body: some View {
         HStack(spacing: spacing) {
-            Button(action: isToiletLocked ? onBlocked : onSleep) {
-                Image(sleepImageName)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: buttonSize, height: buttonSize)
-            }
-
-            Button(action: isToiletLocked ? onBlocked : onBath) {
+            Button(action: {
+                bgmManager.playSE(.push)
+                if isToiletLocked {
+                    onBlocked()
+                } else {
+                    onBath()
+                }
+            }) {
                 Image(bathImageName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: buttonSize, height: buttonSize)
             }
 
-            Button(action: isToiletLocked ? onBlocked : onFood) {
+            Button(action: {
+                bgmManager.playSE(.push)
+                if isToiletLocked {
+                    onBlocked()
+                } else {
+                    onFood()
+                }
+            }) {
                 Image(foodImageName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: buttonSize, height: buttonSize)
             }
 
-            Button(action: onWc) {
+            Button(action: {
+                bgmManager.playSE(.push)
+                onWc()
+            }) {
                 Image(wcImageName)
                     .resizable()
                     .scaledToFit()
                     .frame(width: buttonSize, height: buttonSize)
             }
 
-            Button(action: isToiletLocked ? onBlocked : onHome) {
-                Image("home_button")
+            Button(action: {
+                bgmManager.playSE(.push)
+                if isToiletLocked {
+                    onBlocked()
+                } else {
+                    onStep()
+                }
+            }) {
+                Image("step_button")
                     .resizable()
                     .scaledToFit()
                     .frame(width: buttonSize, height: buttonSize)
