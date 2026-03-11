@@ -110,22 +110,27 @@ struct HomeView: View {
 
     // ✅ 追加：現在育成中キャラの「ベースアセット名」
     private var currentBaseAssetName: String {
-        PetMaster.assetName(for: state.currentPetID)
+        PetMaster.assetName(for: state.normalizedCurrentPetID)
     }
 
     // ✅ 追加：表示用キャラ名
     private var currentPetName: String {
-        PetMaster.all.first(where: { $0.id == state.currentPetID })?.name ?? "ペット"
+        PetMaster.all.first(where: { $0.id == state.normalizedCurrentPetID })?.name ?? "ペット"
     }
 
     // ✅ 追加：トイレロック中か
     private var isToiletLocked: Bool {
-        state.toiletFlagAt != nil
+        state.hasToiletFlag
     }
 
     // ✅ 追加：おふろフラグ中か
     private var hasBathFlag: Bool {
         state.hasBathFlag
+    }
+
+    // ✅ 追加：ウィジェット連携時に使う歩数
+    private var widgetLinkedTodaySteps: Int {
+        max(todaySteps, state.widgetTodaySteps)
     }
 
     // ✅ 追加：トイレ中に表示する *_wc が用意されているキャラ
@@ -672,7 +677,7 @@ struct HomeView: View {
                 todayActiveKcal: captureMetricValues.activeKcal,
                 todayTotalKcal: captureMetricValues.totalKcal,
                 plainBackgroundAssetName: Layout.homeBackgroundAssetName,
-                characterAssetName: PetMaster.assetName(for: state.currentPetID),
+                characterAssetName: PetMaster.assetName(for: state.normalizedCurrentPetID),
                 metricValueProvider: {
                     let values = captureMetricValues
                     return (
@@ -700,7 +705,7 @@ struct HomeView: View {
                 didSetDailyGoalOnce = true
             }
 
-            todaySteps = state.cachedTodaySteps
+            todaySteps = state.widgetTodaySteps
             todayKcal = state.cachedTodayKcal
 
             displayedTodayKcal = todayKcal
@@ -736,7 +741,7 @@ struct HomeView: View {
 
             syncCharacterBaseFromState(force: true)
 
-            todaySteps = state.cachedTodaySteps
+            todaySteps = state.widgetTodaySteps
             todayKcal = state.cachedTodayKcal
 
             displayedTodayKcal = todayKcal
@@ -810,6 +815,7 @@ struct HomeView: View {
             updateToiletWiggle()
             syncBathOverlayFromState(animated: false)
             syncCharacterBaseFromState(force: true)
+            updateWidgetSnapshot()
         }
         .onDisappear {
             isHomeVisible = false
@@ -823,6 +829,7 @@ struct HomeView: View {
         .onChange(of: state.walletKcal) { _, _ in
             guard isHomeVisible else { return }
             Task { await reconcileWalletDisplayIfNeeded(state: state) }
+            updateWidgetSnapshot()
         }
         .onChange(of: state.dailyGoalKcal) { _, _ in
             if state.dailyGoalKcal > 0, didSetDailyGoalOnce == false {
@@ -1200,12 +1207,12 @@ struct HomeView: View {
             return false
         }
 
-        let isSuperFavorite = isSuperFavoriteFood(foodId: food.id, petID: state.currentPetID)
+        let isSuperFavorite = isSuperFavoriteFood(foodId: food.id, petID: state.normalizedCurrentPetID)
         let basePoint = 10
         let gainedPoint = isSuperFavorite ? (basePoint * 2) : basePoint
 
         if isSuperFavorite {
-            state.revealSuperFavorite(petID: state.currentPetID)
+            state.revealSuperFavorite(petID: state.normalizedCurrentPetID)
         }
 
         save()
@@ -1544,7 +1551,7 @@ struct HomeView: View {
     }
 
     private func onTapToilet(state: AppState) {
-        if state.toiletFlagAt != nil {
+        if state.hasToiletFlag {
             bgmManager.playSE(.wc)
             resolveToilet(state: state)
             syncCharacterBaseFromState(force: true)
@@ -1585,12 +1592,8 @@ struct HomeView: View {
     }
 
     private func updateWidgetSnapshot() {
-        let snapshot = WidgetPetSnapshotPublisher.makeSnapshot(
-            state: state,
-            todaySteps: max(todaySteps, state.cachedTodaySteps),
-            now: Date()
-        )
-        WidgetPetSnapshotStore.save(snapshot)
+        let widgetState = state.makeWidgetStateSnapshot(todaySteps: widgetLinkedTodaySteps)
+        HomeWidgetBridge.save(widgetState: widgetState)
 
         #if canImport(WidgetKit)
         WidgetCenter.shared.reloadTimelines(ofKind: "CalPetMediumWidget")
@@ -1721,6 +1724,26 @@ struct HomeView: View {
 
         isAnimatingGain = false
         syncCharacterBaseFromState(force: true)
+    }
+}
+
+// MARK: - Widget Bridge
+private enum HomeWidgetBridge {
+    // ⚠️ Widget 側と同じ App Group ID を設定してください
+    private static let appGroupID = "group.com.shota.CalPet"
+
+    private static let toiletFlagKey = "toiletFlag"
+    private static let bathFlagKey = "bathFlag"
+    private static let currentPetIDKey = "currentPetID"
+    private static let todayStepsKey = "todaySteps"
+
+    static func save(widgetState: AppState.WidgetStateSnapshot) {
+        guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
+
+        defaults.set(widgetState.toiletFlag, forKey: toiletFlagKey)
+        defaults.set(widgetState.bathFlag, forKey: bathFlagKey)
+        defaults.set(widgetState.currentPetID, forKey: currentPetIDKey)
+        defaults.set(widgetState.todaySteps, forKey: todayStepsKey)
     }
 }
 

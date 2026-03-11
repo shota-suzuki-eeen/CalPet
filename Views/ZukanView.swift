@@ -7,6 +7,9 @@
 
 import SwiftUI
 import SwiftData
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 struct ZukanView: View {
     @Query private var appStates: [AppState]
@@ -36,7 +39,7 @@ struct ZukanView: View {
                     ZukanGrid(
                         petIDs: initialPetIDs,
                         ownedIDs: Set(state.ownedPetIDs()),
-                        currentPetID: state.currentPetID,
+                        currentPetID: state.normalizedCurrentPetID,
                         columns: columns,
                         selectedPetID: selectedPetID,
                         onSelect: { id in
@@ -47,7 +50,7 @@ struct ZukanView: View {
 
                     ZukanDetailPanel(
                         state: state,
-                        selectedPetID: selectedPetID ?? state.currentPetID,
+                        selectedPetID: selectedPetID ?? state.normalizedCurrentPetID,
                         onTrain: { id in
                             // ✅ 仕様：押したら interstitial → 見終わったら切替
                             handleTrainTapped(state: state, id: id)
@@ -83,8 +86,8 @@ struct ZukanView: View {
 
             // ✅ 選択中IDが未実装IDだった場合の保険
             if selectedPetID == nil || selectedPetID == "pet_011" {
-                selectedPetID = initialPetIDs.contains(state.currentPetID)
-                    ? state.currentPetID
+                selectedPetID = initialPetIDs.contains(state.normalizedCurrentPetID)
+                    ? state.normalizedCurrentPetID
                     : initialPetIDs.first
             }
 
@@ -100,7 +103,7 @@ struct ZukanView: View {
         let switchPet: () -> Void = {
             state.currentPetID = id
             selectedPetID = id
-            save()
+            save(state: state)
         }
 
         // ✅ 広告が用意できていれば表示 → 見終わったら切替
@@ -116,13 +119,43 @@ struct ZukanView: View {
         }
     }
 
-    private func save() {
+    private func save(state: AppState) {
         do {
             try modelContext.save()
+            updateWidgetSnapshot(state: state)
         } catch {
             // ✅ 握りつぶすと原因追跡が難しいので最低限ログ
             print("❌ ZukanView save error:", error)
         }
+    }
+
+    private func updateWidgetSnapshot(state: AppState) {
+        let widgetState = state.makeWidgetStateSnapshot()
+        ZukanWidgetBridge.save(widgetState: widgetState)
+
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadTimelines(ofKind: "CalPetMediumWidget")
+        #endif
+    }
+}
+
+// MARK: - Widget Bridge
+private enum ZukanWidgetBridge {
+    // ⚠️ HomeView / Widget 側と同じ App Group ID を設定してください
+    private static let appGroupID = "group.com.shota.CalPet"
+
+    private static let toiletFlagKey = "toiletFlag"
+    private static let bathFlagKey = "bathFlag"
+    private static let currentPetIDKey = "currentPetID"
+    private static let todayStepsKey = "todaySteps"
+
+    static func save(widgetState: AppState.WidgetStateSnapshot) {
+        guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
+
+        defaults.set(widgetState.toiletFlag, forKey: toiletFlagKey)
+        defaults.set(widgetState.bathFlag, forKey: bathFlagKey)
+        defaults.set(widgetState.currentPetID, forKey: currentPetIDKey)
+        defaults.set(widgetState.todaySteps, forKey: todayStepsKey)
     }
 }
 
@@ -230,7 +263,7 @@ private struct ZukanDetailPanel: View {
     }
 
     private var isCurrent: Bool {
-        state.currentPetID == selectedPetID
+        state.normalizedCurrentPetID == selectedPetID
     }
 
     // ✅ NEW: 大好物（表示用）

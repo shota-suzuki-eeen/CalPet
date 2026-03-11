@@ -1,44 +1,69 @@
+//
+//  WidgetPetSnapshot.swift
+//  Cal Pet
+//
+//  Created by shota suzuki on 2026/02/03.
+//
+
 import Foundation
 
-struct WidgetPetSnapshot: Codable {
+struct WidgetPetSnapshot: Equatable {
+    let toiletFlag: Bool
+    let bathFlag: Bool
     let currentPetID: String
-    let displayAssetName: String
-    let isToiletFlagged: Bool
-    let isBathFlagged: Bool
     let todaySteps: Int
-    let updatedAt: Date
 
     static let `default` = WidgetPetSnapshot(
+        toiletFlag: false,
+        bathFlag: false,
         currentPetID: "pet_000",
-        displayAssetName: "purpor",
-        isToiletFlagged: false,
-        isBathFlagged: false,
-        todaySteps: 0,
-        updatedAt: Date()
+        todaySteps: 0
     )
-}
 
-enum WidgetSharedConfig {
-    // NOTE: Xcode capability の App Groups でも同じ ID を設定してください。
-    static let appGroupID = "group.xxx.calpet"
-    static let snapshotKey = "widget.pet.snapshot"
-}
+    var isToiletFlagged: Bool { toiletFlag }
+    var isBathFlagged: Bool { bathFlag }
 
-enum WidgetPetSnapshotStore {
-    static func save(_ snapshot: WidgetPetSnapshot) {
-        guard let defaults = UserDefaults(suiteName: WidgetSharedConfig.appGroupID),
-              let data = try? JSONEncoder().encode(snapshot) else {
-            return
+    var displayAssetName: String {
+        let base = WidgetPetAssetMap.assetName(for: currentPetID)
+        if toiletFlag, WidgetPetAssetMap.hasToiletVariant(baseAssetName: base) {
+            return "\(base)_wc"
         }
-        defaults.set(data, forKey: WidgetSharedConfig.snapshotKey)
+        return base
+    }
+}
+
+enum WidgetPetAssetMap {
+    static func assetName(for petID: String) -> String {
+        switch petID.trimmingCharacters(in: .whitespacesAndNewlines) {
+        case "pet_000": return "purpor"
+        case "pet_001": return "obaoru"
+        case "pet_002": return "ninjin"
+        case "pet_003": return "kakke"
+        case "pet_004": return "beat"
+        case "pet_005": return "biniki"
+        case "pet_006": return "himei"
+        case "pet_007": return "kepyon"
+        case "pet_008": return "sun"
+        case "pet_009": return "wanigeeta"
+        case "pet_010": return "wareware"
+        case "pet_011": return "purpor"   // 未実装時の保険
+        default: return "purpor"
+        }
     }
 
-    static func load() -> WidgetPetSnapshot {
-        guard let defaults = UserDefaults(suiteName: WidgetSharedConfig.appGroupID),
-              let data = defaults.data(forKey: WidgetSharedConfig.snapshotKey),
-              let snapshot = try? JSONDecoder().decode(WidgetPetSnapshot.self, from: data) else {
-            return .default
-        }
-        return snapshot
+    static func hasToiletVariant(baseAssetName: String) -> Bool {
+        [
+            "beat",
+            "biniki",
+            "himei",
+            "kakke",
+            "kepyon",
+            "ninjin",
+            "obaoru",
+            "purpor",
+            "sun",
+            "wanigeeta",
+            "wareware"
+        ].contains(baseAssetName)
     }
 }

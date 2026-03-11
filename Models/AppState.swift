@@ -212,6 +212,38 @@ final class AppState {
     }
 }
 
+// MARK: - Widget Support
+extension AppState {
+    struct WidgetStateSnapshot: Equatable {
+        let toiletFlag: Bool
+        let bathFlag: Bool
+        let currentPetID: String
+        let todaySteps: Int
+    }
+
+    var hasToiletFlag: Bool {
+        toiletFlagAt != nil
+    }
+
+    var normalizedCurrentPetID: String {
+        let trimmed = currentPetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "pet_000" : trimmed
+    }
+
+    var widgetTodaySteps: Int {
+        max(0, cachedTodaySteps)
+    }
+
+    func makeWidgetStateSnapshot(todaySteps overrideTodaySteps: Int? = nil) -> WidgetStateSnapshot {
+        WidgetStateSnapshot(
+            toiletFlag: hasToiletFlag,
+            bathFlag: hasBathFlag,
+            currentPetID: normalizedCurrentPetID,
+            todaySteps: max(0, overrideTodaySteps ?? cachedTodaySteps)
+        )
+    }
+}
+
 // MARK: - Currency helpers
 extension AppState {
     @discardableResult
