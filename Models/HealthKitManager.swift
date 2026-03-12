@@ -8,6 +8,9 @@
 import Foundation
 import HealthKit
 import Combine
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 @MainActor
 final class HealthKitManager: ObservableObject {
@@ -120,6 +123,9 @@ final class HealthKitManager: ObservableObject {
             if protectedBasal > 0 { lastGoodBasalKcal = protectedBasal }
             if protectedTotal > 0 { lastGoodTotalKcal = protectedTotal }
 
+            // ✅ 追加：歩数だけでも Widget へ早めに反映
+            pushTodayStepsToWidgetIfNeeded(protectedSteps)
+
             return (max(0, totalDelta), now)
         } catch {
             errorMessage = "同期に失敗: \(error.localizedDescription)"
@@ -203,13 +209,44 @@ final class HealthKitManager: ObservableObject {
 
     public func fetchTodayStepTotal(now: Date = Date()) async -> Int {
         let start = Calendar.current.startOfDay(for: now)
-        return await fetchStepCount(from: start, to: now)
+        let fetched = await fetchStepCount(from: start, to: now)
+
+        let todayKey = Self.makeDayKey(now)
+        if lastGoodDayKey != todayKey {
+            lastGoodDayKey = todayKey
+            lastGoodSteps = 0
+        }
+
+        let protectedSteps = (fetched == 0 && lastGoodSteps > 0) ? lastGoodSteps : fetched
+
+        todaySteps = protectedSteps
+        if protectedSteps > 0 {
+            lastGoodSteps = protectedSteps
+        }
+
+        // ✅ 追加：StepEnjoy 系の取得でも Widget 側へ反映
+        pushTodayStepsToWidgetIfNeeded(protectedSteps)
+
+        return protectedSteps
     }
 
     public func fetchWeekStepTotal(now: Date = Date()) async -> Int {
         let calendar = Calendar.current
         let start = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? calendar.startOfDay(for: now)
         return await fetchStepCount(from: start, to: now)
+    }
+
+    // MARK: - Widget Bridge
+
+    private func pushTodayStepsToWidgetIfNeeded(_ steps: Int) {
+        let safeSteps = max(0, steps)
+        let changed = HealthKitWidgetBridge.saveTodaySteps(safeSteps)
+
+        #if canImport(WidgetKit)
+        if changed {
+            WidgetCenter.shared.reloadTimelines(ofKind: HealthKitWidgetBridge.widgetKind)
+        }
+        #endif
     }
 
     // MARK: - DayKey
@@ -221,5 +258,27 @@ final class HealthKitManager: ObservableObject {
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyyMMdd"
         return f.string(from: date)
+    }
+}
+
+// MARK: - Widget Bridge
+
+private enum HealthKitWidgetBridge {
+    static let appGroupID = "group.com.shota.CalPet"
+    static let widgetKind = "CalPetMediumWidget"
+
+    private static let todayStepsKey = "todaySteps"
+    private static let lastStepsSignatureKey = "healthKitWidgetLastTodaySteps"
+
+    static func saveTodaySteps(_ todaySteps: Int) -> Bool {
+        guard let defaults = UserDefaults(suiteName: appGroupID) else { return false }
+
+        let safeSteps = max(0, todaySteps)
+        let previousSteps = defaults.object(forKey: lastStepsSignatureKey) as? Int
+
+        defaults.set(safeSteps, forKey: todayStepsKey)
+        defaults.set(safeSteps, forKey: lastStepsSignatureKey)
+
+        return previousSteps != safeSteps
     }
 }

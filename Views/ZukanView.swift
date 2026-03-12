@@ -31,7 +31,6 @@ struct ZukanView: View {
 
     var body: some View {
         ZStack {
-            // ✅ 背景画像を見せたいので、ベタ塗りをやめる（レイアウトは変わらない）
             Color.clear.ignoresSafeArea()
 
             VStack(spacing: 14) {
@@ -52,7 +51,6 @@ struct ZukanView: View {
                         state: state,
                         selectedPetID: selectedPetID ?? state.normalizedCurrentPetID,
                         onTrain: { id in
-                            // ✅ 仕様：押したら interstitial → 見終わったら切替
                             handleTrainTapped(state: state, id: id)
                         }
                     )
@@ -84,78 +82,124 @@ struct ZukanView: View {
             guard let state else { return }
             state.ensureInitialPetsIfNeeded()
 
-            // ✅ 選択中IDが未実装IDだった場合の保険
             if selectedPetID == nil || selectedPetID == "pet_011" {
                 selectedPetID = initialPetIDs.contains(state.normalizedCurrentPetID)
                     ? state.normalizedCurrentPetID
                     : initialPetIDs.first
             }
 
-            // ✅ 追加：初回から出せるように事前ロード
+            updateWidgetSnapshot(state: state, forceReload: true)
             interstitial.load()
         }
     }
 
-    // ✅ 追加：ボタン押下ハンドラ（広告→切替）
+    // MARK: - Train Action
+
     private func handleTrainTapped(state: AppState, id: String) {
         bgmManager.playSE(.push)
 
         let switchPet: () -> Void = {
+            print("----- switchPet start -----")
+            print("✅ tapped id:", id)
+            print("✅ before state.currentPetID:", state.currentPetID)
+            print("✅ before state.normalizedCurrentPetID:", state.normalizedCurrentPetID)
+
             state.currentPetID = id
             selectedPetID = id
-            save(state: state)
+
+            print("✅ after state.currentPetID:", state.currentPetID)
+            print("✅ after state.normalizedCurrentPetID:", state.normalizedCurrentPetID)
+
+            save(state: state, forceWidgetReload: true)
+
+            print("----- switchPet end -----")
         }
 
-        // ✅ 広告が用意できていれば表示 → 見終わったら切替
         if interstitial.isReady {
             interstitial.show {
                 switchPet()
             }
         } else {
-            // ✅ フォールバック：まだ広告が無いならそのまま切替（UX優先）
             switchPet()
-            // 次回のためにロードしておく
             interstitial.load()
         }
     }
 
-    private func save(state: AppState) {
+    // MARK: - Persistence
+
+    private func save(state: AppState, forceWidgetReload: Bool = false) {
         do {
             try modelContext.save()
-            updateWidgetSnapshot(state: state)
+            updateWidgetSnapshot(state: state, forceReload: forceWidgetReload)
         } catch {
-            // ✅ 握りつぶすと原因追跡が難しいので最低限ログ
             print("❌ ZukanView save error:", error)
         }
     }
 
-    private func updateWidgetSnapshot(state: AppState) {
+    private func updateWidgetSnapshot(state: AppState, forceReload: Bool = false) {
         let widgetState = state.makeWidgetStateSnapshot()
-        ZukanWidgetBridge.save(widgetState: widgetState)
+        print("✅ updateWidgetSnapshot currentPetID:", widgetState.currentPetID)
+        print("✅ updateWidgetSnapshot todaySteps:", widgetState.todaySteps)
+
+        let changed = ZukanWidgetBridge.save(widgetState: widgetState)
 
         #if canImport(WidgetKit)
-        WidgetCenter.shared.reloadTimelines(ofKind: "CalPetMediumWidget")
+        if forceReload || changed {
+            WidgetCenter.shared.reloadAllTimelines()
+            print("✅ WidgetCenter.reloadAllTimelines called")
+        } else {
+            print("ℹ️ Widget snapshot unchanged, reload skipped")
+        }
         #endif
     }
 }
 
 // MARK: - Widget Bridge
+
 private enum ZukanWidgetBridge {
     // ⚠️ HomeView / Widget 側と同じ App Group ID を設定してください
-    private static let appGroupID = "group.com.shota.CalPet"
+    static let appGroupID = "group.com.shota.CalPet"
+    static let widgetKind = "CalPetMediumWidget"
 
     private static let toiletFlagKey = "toiletFlag"
     private static let bathFlagKey = "bathFlag"
     private static let currentPetIDKey = "currentPetID"
     private static let todayStepsKey = "todaySteps"
+    private static let lastSignatureKey = "zukanWidgetLastSignature"
 
-    static func save(widgetState: AppState.WidgetStateSnapshot) {
-        guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
+    static func save(widgetState: AppState.WidgetStateSnapshot) -> Bool {
+        guard let defaults = UserDefaults(suiteName: appGroupID) else {
+            print("❌ ZukanWidgetBridge defaults is nil. appGroupID:", appGroupID)
+            return false
+        }
+
+        let normalizedPetID = widgetState.currentPetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safePetID = normalizedPetID.isEmpty ? "pet_000" : normalizedPetID
+        let safeSteps = max(0, widgetState.todaySteps)
+
+        print("----- ZukanWidgetBridge.save start -----")
+        print("✅ widgetState.currentPetID:", widgetState.currentPetID)
+        print("✅ safePetID:", safePetID)
+        print("✅ widgetState.todaySteps:", widgetState.todaySteps)
+
+        let signature = "\(widgetState.toiletFlag)|\(widgetState.bathFlag)|\(safePetID)|\(safeSteps)"
+        let previousSignature = defaults.string(forKey: lastSignatureKey)
 
         defaults.set(widgetState.toiletFlag, forKey: toiletFlagKey)
         defaults.set(widgetState.bathFlag, forKey: bathFlagKey)
-        defaults.set(widgetState.currentPetID, forKey: currentPetIDKey)
-        defaults.set(widgetState.todaySteps, forKey: todayStepsKey)
+        defaults.set(safePetID, forKey: currentPetIDKey)
+        defaults.set(safeSteps, forKey: todayStepsKey)
+        defaults.set(signature, forKey: lastSignatureKey)
+
+        defaults.synchronize()
+
+        print("✅ saved currentPetID:", defaults.string(forKey: currentPetIDKey) ?? "nil")
+        print("✅ saved todaySteps:", defaults.object(forKey: todayStepsKey) ?? "nil")
+        print("✅ previousSignature:", previousSignature ?? "nil")
+        print("✅ newSignature:", signature)
+        print("----- ZukanWidgetBridge.save end -----")
+
+        return previousSignature != signature
     }
 }
 
@@ -266,18 +310,14 @@ private struct ZukanDetailPanel: View {
         state.normalizedCurrentPetID == selectedPetID
     }
 
-    // ✅ NEW: 大好物（表示用）
     private var superFavoriteDisplayText: String {
         state.isSuperFavoriteRevealed(petID: selectedPetID)
         ? PetMaster.superFavoriteFoodName(for: selectedPetID)
         : "？？？"
     }
 
-    // ✅ 説明文：PetMaster側のテキストから「【大好物】」行を除いた本文だけを表示する
-    // （表示はこのViewで必ず別途出す＝kakkeだけ消える等の事故を防ぐ）
     private var descriptionBodyText: String {
         let full = PetMaster.description(for: selectedPetID, state: state)
-        // PetMasterは "\n\n【大好物】" を付与している前提
         let parts = full.components(separatedBy: "\n\n【大好物】")
         return parts.first ?? full
     }
@@ -311,13 +351,11 @@ private struct ZukanDetailPanel: View {
                     Text(selectedName)
                         .font(.headline)
 
-                    // ✅ 本文
                     Text(descriptionBodyText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // ✅ 大好物：常にここで表示する（kakkeだけ消える等を回避）
                     Text("【大好物】\(superFavoriteDisplayText)")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)

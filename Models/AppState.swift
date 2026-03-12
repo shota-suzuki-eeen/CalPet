@@ -230,16 +230,27 @@ extension AppState {
         return trimmed.isEmpty ? "pet_000" : trimmed
     }
 
+    /// ✅ Widget に渡す currentPetID は常に安全な値に正規化
+    var widgetCurrentPetID: String {
+        normalizedCurrentPetID
+    }
+
+    /// ✅ Widget に渡す歩数は負数を防ぎつつキャッシュ値を利用
     var widgetTodaySteps: Int {
         max(0, cachedTodaySteps)
+    }
+
+    /// ✅ 呼び出し側がより新しい歩数を持っている場合に上書き可能
+    func resolvedWidgetTodaySteps(_ overrideTodaySteps: Int? = nil) -> Int {
+        max(0, overrideTodaySteps ?? cachedTodaySteps)
     }
 
     func makeWidgetStateSnapshot(todaySteps overrideTodaySteps: Int? = nil) -> WidgetStateSnapshot {
         WidgetStateSnapshot(
             toiletFlag: hasToiletFlag,
             bathFlag: hasBathFlag,
-            currentPetID: normalizedCurrentPetID,
-            todaySteps: max(0, overrideTodaySteps ?? cachedTodaySteps)
+            currentPetID: widgetCurrentPetID,
+            todaySteps: resolvedWidgetTodaySteps(overrideTodaySteps)
         )
     }
 }
@@ -724,6 +735,11 @@ extension AppState {
             ids = ["pet_000"]
             setOwnedPetIDs(ids)
             currentPetID = "pet_000"
+            return
+        }
+
+        if !ids.contains(normalizedCurrentPetID) {
+            currentPetID = ids.first ?? "pet_000"
         }
     }
 

@@ -309,7 +309,6 @@ struct HomeView: View {
         static let lockedPopupPaddingV: CGFloat = 12
         static let lockedPopupShowSeconds: Double = 1.1
 
-        // ✅ yogore をゆっくりめに表示 / 非表示
         static let bathFadeInDuration: Double = 0.95
         static let bathFadeOutDuration: Double = 1.15
 
@@ -340,7 +339,6 @@ struct HomeView: View {
                                     .onTapGesture { closeFoodShelf() }
                             }
 
-                            // 1) キャラクター
                             ZStack {
                                 Rectangle()
                                     .fill(Color.black.opacity(0.001))
@@ -410,7 +408,6 @@ struct HomeView: View {
                                     .allowsHitTesting(false)
                             }
 
-                            // 2) 左上：メーター
                             VStack(alignment: .leading, spacing: Layout.meterStackSpacing) {
                                 FriendshipMeter(
                                     value: displayedFriendship,
@@ -456,7 +453,6 @@ struct HomeView: View {
                                 }
                             )
 
-                            // 3) 右上：リング
                             KcalRing(
                                 progress: displayedKcalProgress,
                                 currentKcal: displayedTodayKcal,
@@ -473,7 +469,6 @@ struct HomeView: View {
                                 }
                             )
 
-                            // 4) 右側：縦ボタン
                             RightSideButtons(
                                 state: state,
                                 onCamera: {
@@ -497,7 +492,6 @@ struct HomeView: View {
                                 }
                             )
 
-                            // 4.5) ごはん棚
                             if showFoodShelf {
                                 FoodShelfPanel(state: state)
                                     .padding(.horizontal, Layout.foodShelfHorizontalPadding)
@@ -507,7 +501,6 @@ struct HomeView: View {
                                     .zIndex(Layout.zFoodShelf)
                             }
 
-                            // 5) 下部：横ボタン群
                             TimelineView(.periodic(from: Date(), by: Layout.careSpawnCheckInterval)) { timeline in
                                 let now = timeline.date
 
@@ -586,7 +579,6 @@ struct HomeView: View {
                                 }
                             )
 
-                            // 6) “もじゃ” 演出
                             if showMojaOverlay {
                                 ZStack {
                                     Color.black.opacity(0.001)
@@ -734,7 +726,7 @@ struct HomeView: View {
             updateToiletWiggle()
             syncBathOverlayFromState(animated: false)
             syncCharacterBaseFromState(force: true)
-            updateWidgetSnapshot()
+            updateWidgetSnapshot(forceReload: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             state.ensureInitialPetsIfNeeded()
@@ -769,7 +761,7 @@ struct HomeView: View {
                 updateToiletWiggle()
                 syncBathOverlayFromState(animated: false)
                 syncCharacterBaseFromState(force: true)
-                updateWidgetSnapshot()
+                updateWidgetSnapshot(forceReload: true)
             }
         }
         .sheet(isPresented: $showGoalSheet) {
@@ -815,7 +807,7 @@ struct HomeView: View {
             updateToiletWiggle()
             syncBathOverlayFromState(animated: false)
             syncCharacterBaseFromState(force: true)
-            updateWidgetSnapshot()
+            updateWidgetSnapshot(forceReload: true)
         }
         .onDisappear {
             isHomeVisible = false
@@ -839,9 +831,12 @@ struct HomeView: View {
                 displayedKcalProgress = calcKcalProgressRaw(todayKcal: displayedTodayKcal, goalKcal: state.dailyGoalKcal)
             }
         }
+        .onChange(of: todaySteps) { _, _ in
+            updateWidgetSnapshot()
+        }
         .onChange(of: state.currentPetID) { _, _ in
             syncCharacterBaseFromState(force: true)
-            updateWidgetSnapshot()
+            updateWidgetSnapshot(forceReload: true)
         }
         .onChange(of: isDropTargeted) { _, newValue in
             if newValue {
@@ -857,15 +852,14 @@ struct HomeView: View {
         .onChange(of: state.toiletFlagAt) { _, _ in
             syncCharacterBaseFromState(force: true)
             updateToiletWiggle()
-            updateWidgetSnapshot()
+            updateWidgetSnapshot(forceReload: true)
         }
         .onChange(of: state.bathFlagAt) { _, _ in
             syncBathOverlayFromState(animated: true)
-            updateWidgetSnapshot()
+            updateWidgetSnapshot(forceReload: true)
         }
     }
 
-    // MARK: - ✅ トイレ中ブロック表示
     private func showToiletLockedMessage() {
         toiletLockedPopupText = "\(currentPetName)は今それどころじゃない！"
         withAnimation(.easeOut(duration: 0.12)) {
@@ -883,7 +877,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - ✅ トイレモジモジ開始/停止
     private func updateToiletWiggle() {
         if isToiletLocked {
             isToiletWiggleOn = false
@@ -895,7 +888,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - ✅ 満足度カウントダウン
     private func updateSatisfactionCountdown(now: Date = Date()) {
         guard let remaining = state.satisfactionRemainingSecondsUntilNextDecay(now: now),
               displayedSatisfaction > 0 else {
@@ -909,7 +901,6 @@ struct HomeView: View {
         satisfactionRemainingText = String(format: "%02d:%02d", minutes, seconds)
     }
 
-    // MARK: - ✅ おふろ overlay 同期
     private func syncBathOverlayFromState(animated: Bool) {
         let shouldShow = state.hasBathFlag
 
@@ -948,7 +939,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - ✅ currentPetID → 表示キャラ反映
     private func syncCharacterBaseFromState(force: Bool) {
         if !force {
             guard !isCharacterActionRunning else { return }
@@ -957,7 +947,6 @@ struct HomeView: View {
         characterAssetName = preferredCharacterRestAssetName
     }
 
-    // MARK: - ✅ Food Hover（*_hungry / *_burp）
     private func beginFoodHover() {
         guard !isToiletLocked else {
             isFoodHoveringOverCharacter = false
@@ -987,7 +976,6 @@ struct HomeView: View {
         characterAssetName = preferredCharacterRestAssetName
     }
 
-    // MARK: - FoodShelf
     private func closeFoodShelf() {
         guard showFoodShelf else { return }
         withAnimation(.easeInOut(duration: 0.18)) {
@@ -995,7 +983,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Care flag spawn
     private func maybeSpawnBathFlag(state: AppState, now: Date = Date()) {
         let didRaise = state.raiseBathFlagIfNeeded(now: now)
         if didRaise {
@@ -1015,7 +1002,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Character animation
     private func startCharacterIdleLoopIfNeeded() {
         guard idleLoopTask == nil else { return }
 
@@ -1167,7 +1153,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Drag & Drop（ごはん）
     private func handleFoodDrop(foodId: String, state: AppState) -> Bool {
         defer {
             closeFoodShelf()
@@ -1232,7 +1217,6 @@ struct HomeView: View {
         return true
     }
 
-    // MARK: - ✅ Super Favorite (NEW)
     private func isSuperFavoriteFood(foodId: String, petID: String) -> Bool {
         switch petID {
         case "pet_001": return foodId == "ra-men"
@@ -1287,7 +1271,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - UI helpers
     private func calcKcalProgressRaw(todayKcal: Int, goalKcal: Int) -> Double {
         guard goalKcal > 0 else { return 0 }
         return Double(todayKcal) / Double(goalKcal)
@@ -1344,7 +1327,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Friendship points
     private func addFriendshipWithAnimation(points: Int, state: AppState) {
         guard points > 0 else { return }
 
@@ -1410,7 +1392,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - ✅ 今日の一枚（同日複数に対応）
     private func makeUniquePhotoFileName(dayKey: String, now: Date) -> String {
         let ms = Int64(now.timeIntervalSince1970 * 1000)
         return "\(dayKey)_\(ms).jpg"
@@ -1483,7 +1464,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Toast
     private func toast(_ message: String) {
         toastMessage = message
         withAnimation(.easeInOut(duration: 0.2)) { showToast = true }
@@ -1492,7 +1472,6 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Care (Feed / Bath / Toilet)
     private func onTapFood(state: AppState) {
         guard !isToiletLocked else {
             showToiletLockedMessage()
@@ -1547,6 +1526,7 @@ struct HomeView: View {
             showBathOverlay = false
             isBathCleaningAnimationRunning = false
             syncBathOverlayFromState(animated: false)
+            updateWidgetSnapshot(forceReload: true)
         }
     }
 
@@ -1579,9 +1559,9 @@ struct HomeView: View {
 
         syncCharacterBaseFromState(force: true)
         updateToiletWiggle()
+        updateWidgetSnapshot(forceReload: true)
     }
 
-    // MARK: - AppState
     private func save() {
         do {
             try modelContext.save()
@@ -1591,12 +1571,14 @@ struct HomeView: View {
         }
     }
 
-    private func updateWidgetSnapshot() {
+    private func updateWidgetSnapshot(forceReload: Bool = false) {
         let widgetState = state.makeWidgetStateSnapshot(todaySteps: widgetLinkedTodaySteps)
-        HomeWidgetBridge.save(widgetState: widgetState)
+        let changed = HomeWidgetBridge.save(widgetState: widgetState)
 
         #if canImport(WidgetKit)
-        WidgetCenter.shared.reloadTimelines(ofKind: "CalPetMediumWidget")
+        if forceReload || changed {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
         #endif
     }
 
@@ -1730,20 +1712,34 @@ struct HomeView: View {
 // MARK: - Widget Bridge
 private enum HomeWidgetBridge {
     // ⚠️ Widget 側と同じ App Group ID を設定してください
-    private static let appGroupID = "group.com.shota.CalPet"
+    static let appGroupID = "group.com.shota.CalPet"
+    static let widgetKind = "CalPetMediumWidget"
 
     private static let toiletFlagKey = "toiletFlag"
     private static let bathFlagKey = "bathFlag"
     private static let currentPetIDKey = "currentPetID"
     private static let todayStepsKey = "todaySteps"
+    private static let lastSignatureKey = "homeWidgetLastSignature"
 
-    static func save(widgetState: AppState.WidgetStateSnapshot) {
-        guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
+    static func save(widgetState: AppState.WidgetStateSnapshot) -> Bool {
+        guard let defaults = UserDefaults(suiteName: appGroupID) else { return false }
+
+        let normalizedPetID = widgetState.currentPetID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safePetID = normalizedPetID.isEmpty ? "pet_000" : normalizedPetID
+        let safeSteps = max(0, widgetState.todaySteps)
+
+        let signature = "\(widgetState.toiletFlag)|\(widgetState.bathFlag)|\(safePetID)|\(safeSteps)"
+        let previousSignature = defaults.string(forKey: lastSignatureKey)
 
         defaults.set(widgetState.toiletFlag, forKey: toiletFlagKey)
         defaults.set(widgetState.bathFlag, forKey: bathFlagKey)
-        defaults.set(widgetState.currentPetID, forKey: currentPetIDKey)
-        defaults.set(widgetState.todaySteps, forKey: todayStepsKey)
+        defaults.set(safePetID, forKey: currentPetIDKey)
+        defaults.set(safeSteps, forKey: todayStepsKey)
+        defaults.set(signature, forKey: lastSignatureKey)
+
+        defaults.synchronize()
+
+        return previousSignature != signature
     }
 }
 
