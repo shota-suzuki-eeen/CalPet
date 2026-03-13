@@ -15,6 +15,7 @@ struct ZukanView: View {
     @Query private var appStates: [AppState]
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var bgmManager: BGMManager
+    @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
 
     private var state: AppState? { appStates.first }
 
@@ -52,7 +53,8 @@ struct ZukanView: View {
                         selectedPetID: selectedPetID ?? state.normalizedCurrentPetID,
                         onTrain: { id in
                             handleTrainTapped(state: state, id: id)
-                        }
+                        },
+                        isDeveloperMode: isDeveloperMode
                     )
                     .padding(.top, 6)
 
@@ -113,6 +115,12 @@ struct ZukanView: View {
             save(state: state, forceWidgetReload: true)
 
             print("----- switchPet end -----")
+        }
+
+        // ✅ 開発者モード中は広告を出さずそのまま切替
+        if isDeveloperMode {
+            switchPet()
+            return
         }
 
         if interstitial.isReady {
@@ -297,6 +305,7 @@ private struct ZukanDetailPanel: View {
     let state: AppState
     let selectedPetID: String
     let onTrain: (String) -> Void
+    let isDeveloperMode: Bool
 
     private var selectedName: String {
         PetMaster.all.first(where: { $0.id == selectedPetID })?.name ?? selectedPetID
@@ -327,10 +336,18 @@ private struct ZukanDetailPanel: View {
             Button {
                 onTrain(selectedPetID)
             } label: {
-                Text(isCurrent ? "\(selectedName) をお世話中" : "\(selectedName) をお世話する")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                Text(
+                    isCurrent
+                    ? "\(selectedName) をお世話中"
+                    : (
+                        isDeveloperMode
+                        ? "\(selectedName) をお世話する（広告なし）"
+                        : "\(selectedName) をお世話する"
+                    )
+                )
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
             }
             .buttonStyle(.borderedProminent)
             .disabled(isCurrent)

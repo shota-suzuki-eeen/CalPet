@@ -12,6 +12,7 @@ import UIKit
 struct ShopView: View {
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var bgmManager: BGMManager
+    @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
 
     let state: AppState
     @StateObject private var viewModel = ShopViewModel()
@@ -36,6 +37,7 @@ struct ShopView: View {
                         items: viewModel.decodeShopItems(from: state) ?? [],
                         rewardResetsToday: state.shopRewardResetsToday,
                         maxRewardResetsPerDay: 2,
+                        isDeveloperMode: isDeveloperMode,
                         ownedCountProvider: { itemID in
                             viewModel.ownedCount(for: itemID, state: state)
                         },
@@ -146,6 +148,21 @@ struct ShopView: View {
 
         // もう上限なら何もしない（UIでもdisabledだが保険）
         guard state.shopRewardResetsToday < 2 else { return }
+
+        // ✅ 開発者モード中は広告なしで即報酬
+        if isDeveloperMode {
+            viewModel.rewardResetShopByAd(state: state, maxPerDay: 2)
+            save()
+
+            viewModel.toastMessage = "開発者モード: 広告なしでリセットしました！"
+            viewModel.showToast = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                viewModel.showToast = false
+            }
+
+            Haptics.rattle(duration: 0.18, style: .medium)
+            return
+        }
 
         // ✅ 広告が準備できていない
         guard rewardFoodAd.isReady else {
@@ -301,6 +318,7 @@ private struct DailyShopCard: View {
     let items: [ShopFoodItem]
     let rewardResetsToday: Int
     let maxRewardResetsPerDay: Int
+    let isDeveloperMode: Bool
 
     // ✅ 所持数を外から注入
     let ownedCountProvider: (String) -> Int
@@ -378,7 +396,7 @@ private struct DailyShopCard: View {
             }
 
             HStack(spacing: 10) {
-                Button("広告でリセット") {
+                Button(isDeveloperMode ? "開発者モードでリセット" : "広告でリセット") {
                     onRewardReset()
                 }
                 .buttonStyle(.bordered)

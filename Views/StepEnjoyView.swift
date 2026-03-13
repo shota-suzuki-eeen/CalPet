@@ -10,6 +10,7 @@ import SwiftUI
 struct StepEnjoyView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var bgmManager: BGMManager
+    @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
 
     let state: AppState
     @ObservedObject var hk: HealthKitManager
@@ -138,6 +139,17 @@ struct StepEnjoyView: View {
                         onAdReward: {
                             bgmManager.playSE(.push)
 
+                            if isDeveloperMode {
+                                viewModel.claimAdReward(state: state, save: onSave)
+                                Haptics.notify(.success)
+
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    showRewardPopup = false
+                                    selectedRewardIndex = nil
+                                }
+                                return
+                            }
+
                             guard rewardedAd.isReady else {
                                 rewardedAd.load()
                                 return
@@ -153,7 +165,8 @@ struct StepEnjoyView: View {
                                 }
                             }
                         },
-                        isAdReady: rewardedAd.isReady
+                        isAdReady: isDeveloperMode || rewardedAd.isReady,
+                        isDeveloperMode: isDeveloperMode
                     )
                     .transition(.opacity)
                     .zIndex(999)
@@ -457,6 +470,7 @@ private struct RewardClaimPopup: View {
     let onNormalReward: () -> Void
     let onAdReward: () -> Void
     let isAdReady: Bool
+    let isDeveloperMode: Bool
 
     var body: some View {
         ZStack {
@@ -502,8 +516,12 @@ private struct RewardClaimPopup: View {
 
                     Button(action: onAdReward) {
                         HStack(spacing: 8) {
-                            Image(systemName: "play.rectangle.fill")
-                            Text(isAdReady ? "広告報酬" : "広告を読み込み中...")
+                            Image(systemName: isDeveloperMode ? "hammer.fill" : "play.rectangle.fill")
+                            Text(
+                                isDeveloperMode
+                                ? "開発者モード報酬"
+                                : (isAdReady ? "広告報酬" : "広告を読み込み中...")
+                            )
                         }
                         .font(.system(size: 15, weight: .bold))
                         .frame(maxWidth: .infinity)

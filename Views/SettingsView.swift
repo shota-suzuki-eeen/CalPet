@@ -20,29 +20,57 @@ struct SettingsView: View {
     // ✅ Home側と揃える：初回目標設定済みフラグ
     @AppStorage("didSetDailyGoalOnce") private var didSetDailyGoalOnce: Bool = false
 
+    // ✅ 開発者モード
+    @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
+
     // ✅ 編集モード制御
     @State private var isEditingGoal: Bool = false
 
-    // トースト（任意）
+    // トースト
     @State private var toastMessage: String?
     @State private var showToast: Bool = false
 
+    // ✅ 開発者モード解除/有効化用
+    @State private var hiddenTapCount: Int = 0
+    @State private var lastHiddenTapAt: Date?
+    @State private var showDeveloperPinPopup: Bool = false
+    @State private var developerPinText: String = ""
+    @FocusState private var isDeveloperPinFocused: Bool
+
     private let bgColor = Color(red: 0.35, green: 0.86, blue: 0.88)
+    private let developerPinCode = "eeen"
+    private let hiddenTapRequiredCount = 15
 
     var body: some View {
         let state = ensureAppState()
 
         ZStack {
-            // ✅ 背景画像を見せたいのでベタ塗りはしない（レイアウトは変わらない）
+            // ✅ 背景画像を見せたいのでベタ塗りはしない
             Color.clear.ignoresSafeArea()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     // タイトル
-                    Text("設定")
-                        .font(.title2).bold()
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 8)
+                    HStack(spacing: 8) {
+                        Spacer()
+
+                        Text("設定")
+                            .font(.title2)
+                            .bold()
+
+                        if isDeveloperMode {
+                            Text("DEV")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.orange)
+                                .clipShape(Capsule())
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.top, 8)
 
                     // 目標設定カード
                     VStack(alignment: .leading, spacing: 10) {
@@ -120,15 +148,17 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 24)
+                .contentShape(Rectangle())
             }
 
-            // Toast（任意）
+            // Toast
             VStack {
                 Spacer()
                 if showToast, let toastMessage {
                     Text(toastMessage)
                         .font(.footnote)
                         .foregroundStyle(.primary)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(.thinMaterial)
@@ -138,7 +168,69 @@ struct SettingsView: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
+
+            // ✅ 開発者モードPIN入力ポップアップ
+            if showDeveloperPinPopup {
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .onTapGesture {
+                        closeDeveloperPinPopup()
+                    }
+
+                VStack(spacing: 14) {
+                    Text(isDeveloperMode ? "開発者モードを解除" : "開発者モードを有効化")
+                        .font(.headline)
+
+                    Text("PINコードを入力してください")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    SecureField("PIN", text: $developerPinText)
+                        .textFieldStyle(.roundedBorder)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($isDeveloperPinFocused)
+                        .submitLabel(.done)
+                        .onSubmit {
+                            confirmDeveloperMode()
+                        }
+
+                    HStack(spacing: 10) {
+                        Button("キャンセル") {
+                            bgmManager.playSE(.push)
+                            closeDeveloperPinPopup()
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("決定") {
+                            bgmManager.playSE(.push)
+                            confirmDeveloperMode()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: 320)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 18))
+                .shadow(radius: 16)
+                .padding(.horizontal, 24)
+                .transition(.scale(scale: 0.95).combined(with: .opacity))
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        isDeveloperPinFocused = true
+                    }
+                }
+            }
         }
+        // ✅ 設定画面内のどこをタップしてもカウント対象
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                registerHiddenTap()
+            }
+        )
         // ✅ 背景画像（＋暗幕）を後ろに描画
         .background(
             ZStack {
@@ -152,6 +244,7 @@ struct SettingsView: View {
             }
         )
         .navigationBarTitleDisplayMode(.inline)
+        .animation(.easeInOut(duration: 0.2), value: showDeveloperPinPopup)
         .onAppear {
             isEditingGoal = false
             goalText = state.dailyGoalKcal > 0 ? String(state.dailyGoalKcal) : ""
@@ -187,6 +280,58 @@ struct SettingsView: View {
             }
         } catch {
             errorMessage = "保存に失敗しました。"
+        }
+    }
+
+    // MARK: - Developer Mode
+
+    private func registerHiddenTap() {
+        guard showDeveloperPinPopup == false else { return }
+
+        let now = Date()
+        if let lastHiddenTapAt, now.timeIntervalSince(lastHiddenTapAt) > 1.2 {
+            hiddenTapCount = 0
+        }
+
+        hiddenTapCount += 1
+        lastHiddenTapAt = now
+
+        if hiddenTapCount >= hiddenTapRequiredCount {
+            hiddenTapCount = 0
+            developerPinText = ""
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showDeveloperPinPopup = true
+            }
+            Haptics.rattle(duration: 0.12, style: .light)
+        }
+    }
+
+    private func confirmDeveloperMode() {
+        guard developerPinText == developerPinCode else {
+            Haptics.rattle(duration: 0.14, style: .light)
+            toast("PINコードが違います")
+            developerPinText = ""
+            isDeveloperPinFocused = true
+            return
+        }
+
+        isDeveloperMode.toggle()
+        Haptics.rattle(duration: 0.18, style: .light)
+
+        if isDeveloperMode {
+            toast("開発者モードを有効化しました")
+        } else {
+            toast("開発者モードを解除しました")
+        }
+
+        closeDeveloperPinPopup()
+    }
+
+    private func closeDeveloperPinPopup() {
+        developerPinText = ""
+        isDeveloperPinFocused = false
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showDeveloperPinPopup = false
         }
     }
 

@@ -77,6 +77,16 @@ enum AdUnitID {
     }
 }
 
+// MARK: - Developer Mode
+
+enum DeveloperModeStore {
+    static let key = "isDeveloperMode"
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: key)
+    }
+}
+
 // MARK: - App-level Manager
 
 @MainActor
@@ -94,9 +104,12 @@ final class AdMobManager: ObservableObject {
         guard !didStart else { return }
         didStart = true
 
+        // ✅ 開発者モード中は広告SDK自体を起動しない
+        guard !DeveloperModeStore.isEnabled else { return }
+
         MobileAds.shared.start()
 
-        // ✅ 追加：起動時に1回ロードして持っておく
+        // ✅ 起動時に1回ロードして持っておく
         interstitialCharacterSet.load()
     }
 }
@@ -144,9 +157,15 @@ struct AdMobBannerView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> BannerView {
         let banner = BannerView(adSize: AdSizeBanner)
+        banner.backgroundColor = .clear
+
+        guard !DeveloperModeStore.isEnabled else {
+            context.coordinator.lastLoadedAdUnitID = nil
+            return banner
+        }
+
         banner.adUnitID = adUnitID
         banner.rootViewController = UIApplication.shared.topMostViewController()
-        banner.backgroundColor = .clear
         banner.load(Request())
 
         context.coordinator.lastLoadedAdUnitID = adUnitID
@@ -154,8 +173,15 @@ struct AdMobBannerView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: BannerView, context: Context) {
-        uiView.rootViewController = UIApplication.shared.topMostViewController()
         uiView.backgroundColor = .clear
+
+        guard !DeveloperModeStore.isEnabled else {
+            uiView.rootViewController = nil
+            context.coordinator.lastLoadedAdUnitID = nil
+            return
+        }
+
+        uiView.rootViewController = UIApplication.shared.topMostViewController()
 
         if context.coordinator.lastLoadedAdUnitID != adUnitID {
             uiView.adUnitID = adUnitID
@@ -185,14 +211,16 @@ struct BannerArea: View {
             ZStack {
                 Color.clear
 
-                AdMobBannerView(adUnitID: adUnitID, width: w)
-                    .frame(width: w, height: adH)
-                    .clipped()
-                    .padding(.top, topOffset)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                if !DeveloperModeStore.isEnabled {
+                    AdMobBannerView(adUnitID: adUnitID, width: w)
+                        .frame(width: w, height: adH)
+                        .clipped()
+                        .padding(.top, topOffset)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
             }
         }
-        .frame(height: height)
+        .frame(height: DeveloperModeStore.isEnabled ? 0 : height)
     }
 
     private func normalizeBannerWidth(_ rawW: CGFloat) -> CGFloat {
@@ -223,9 +251,21 @@ final class RewardedAdManager: ObservableObject {
 
     init(adUnitID: String) {
         self.adUnitID = adUnitID
+
+        if DeveloperModeStore.isEnabled {
+            self.isReady = true
+        }
     }
 
     func load() {
+        // ✅ 開発者モード中は常に即時報酬受け取り可能扱い
+        if DeveloperModeStore.isEnabled {
+            isReady = true
+            lastErrorMessage = nil
+            rewardedAd = nil
+            return
+        }
+
         isReady = false
         lastErrorMessage = nil
         rewardedAd = nil
@@ -246,6 +286,15 @@ final class RewardedAdManager: ObservableObject {
     }
 
     func show(onReward: @escaping () -> Void) {
+        // ✅ 開発者モード中は広告を出さずに報酬だけ付与
+        if DeveloperModeStore.isEnabled {
+            onReward()
+            isReady = true
+            lastErrorMessage = nil
+            rewardedAd = nil
+            return
+        }
+
         guard let ad = rewardedAd else {
             isReady = false
             return
@@ -279,9 +328,22 @@ final class InterstitialAdManager: NSObject, ObservableObject {
 
     init(adUnitID: String) {
         self.adUnitID = adUnitID
+        super.init()
+
+        if DeveloperModeStore.isEnabled {
+            self.isReady = true
+        }
     }
 
     func load() {
+        // ✅ 開発者モード中は広告ロード不要
+        if DeveloperModeStore.isEnabled {
+            isReady = true
+            lastErrorMessage = nil
+            interstitialAd = nil
+            return
+        }
+
         isReady = false
         lastErrorMessage = nil
         interstitialAd = nil
@@ -303,6 +365,15 @@ final class InterstitialAdManager: NSObject, ObservableObject {
     }
 
     func show(onDismiss: @escaping () -> Void) {
+        // ✅ 開発者モード中は広告を出さずに後続処理だけ進める
+        if DeveloperModeStore.isEnabled {
+            onDismiss()
+            isReady = true
+            lastErrorMessage = nil
+            interstitialAd = nil
+            return
+        }
+
         guard let ad = interstitialAd else {
             isReady = false
             return

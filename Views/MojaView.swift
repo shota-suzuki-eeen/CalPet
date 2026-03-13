@@ -13,6 +13,7 @@ struct MojaView: View {
 
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var bgmManager: BGMManager
+    @AppStorage("isDeveloperMode") private var isDeveloperMode: Bool = false
 
     @StateObject private var viewModel = MojaViewModel()
 
@@ -38,7 +39,7 @@ struct MojaView: View {
         }
 
         if viewModel.fusionIsRunning {
-            return !rewardedAd.isReady
+            return isDeveloperMode ? false : !rewardedAd.isReady
         }
 
         return !canStartFusion
@@ -46,7 +47,7 @@ struct MojaView: View {
 
     /// ✅ ボタンの見た目用 opacity
     private var mainButtonOpacity: Double {
-        if viewModel.fusionIsRunning && !rewardedAd.isReady {
+        if viewModel.fusionIsRunning && !(isDeveloperMode || rewardedAd.isReady) {
             return 0.6
         }
 
@@ -97,6 +98,16 @@ struct MojaView: View {
 
                     if viewModel.fusionIsRunning {
                         // ✅ 仕様：タイマー動作中は「広告視聴で3時間短縮」
+                        if isDeveloperMode {
+                            viewModel.applyAdReduction(
+                                seconds: 3 * 60 * 60,
+                                now: Date(),
+                                state: state
+                            )
+                            save()
+                            return
+                        }
+
                         if rewardedAd.isReady {
                             rewardedAd.show {
                                 // ✅ 報酬：3時間短縮
@@ -127,7 +138,7 @@ struct MojaView: View {
                             Text("新しいカルペットをGET")
                                 .font(.headline)
                         } else if viewModel.fusionIsRunning {
-                            Text("広告視聴で3時間短縮")
+                            Text(isDeveloperMode ? "3時間短縮する" : "広告視聴で3時間短縮")
                                 .font(.headline)
                         } else {
                             Image("moja")
