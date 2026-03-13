@@ -219,6 +219,13 @@ extension AppState {
         let bathFlag: Bool
         let currentPetID: String
         let todaySteps: Int
+
+        // ✅ 追加：Widget側で未起動中の状態判定に使える時刻情報
+        let toiletFlagAt: Date?
+        let bathFlagAt: Date?
+        let toiletNextSpawnAt: Date?
+        let bathNextSpawnAt: Date?
+        let lastDayKey: String
     }
 
     var hasToiletFlag: Bool {
@@ -250,7 +257,12 @@ extension AppState {
             toiletFlag: hasToiletFlag,
             bathFlag: hasBathFlag,
             currentPetID: widgetCurrentPetID,
-            todaySteps: resolvedWidgetTodaySteps(overrideTodaySteps)
+            todaySteps: resolvedWidgetTodaySteps(overrideTodaySteps),
+            toiletFlagAt: toiletFlagAt,
+            bathFlagAt: bathFlagAt,
+            toiletNextSpawnAt: toiletNextSpawnAt,
+            bathNextSpawnAt: bathNextSpawnAt,
+            lastDayKey: lastDayKey
         )
     }
 }

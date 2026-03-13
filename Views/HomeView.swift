@@ -300,6 +300,7 @@ struct HomeView: View {
         static let zFoodShelf: Double = 220
         static let zBottomButtons: Double = 260
         static let zReward: Double = 300
+        static let zBanner: Double = 1000
 
         static let toiletWiggleOffset: CGFloat = 3
         static let toiletWiggleDuration: Double = 0.12
@@ -324,7 +325,7 @@ struct HomeView: View {
                     .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    AdBannerView(height: Layout.bannerHeight, maxBannerWidth: 320, contentHeight: 50, topOffset: 48)
+                    Color.clear
                         .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
                         .frame(maxWidth: .infinity)
                         .frame(height: Layout.bannerHeight)
@@ -501,84 +502,6 @@ struct HomeView: View {
                                     .zIndex(Layout.zFoodShelf)
                             }
 
-                            TimelineView(.periodic(from: Date(), by: Layout.careSpawnCheckInterval)) { timeline in
-                                let now = timeline.date
-
-                                let canFood = true
-                                let canBath = hasBathFlag
-                                let canWc = true
-
-                                BottomButtons(
-                                    onBath: {
-                                        if isToiletLocked {
-                                            showToiletLockedMessage()
-                                            return
-                                        }
-                                        onTapBath(state: state)
-                                    },
-                                    onFood: {
-                                        if isToiletLocked {
-                                            showToiletLockedMessage()
-                                            return
-                                        }
-                                        onTapFood(state: state)
-                                    },
-                                    onWc: {
-                                        onTapToilet(state: state)
-                                    },
-                                    onStep: {
-                                        if isToiletLocked {
-                                            showToiletLockedMessage()
-                                            return
-                                        }
-                                        onTapStep()
-                                    },
-                                    isBathAvailable: canBath,
-                                    isFoodAvailable: canFood,
-                                    isWcAvailable: canWc,
-                                    isToiletLocked: isToiletLocked,
-                                    onBlocked: { showToiletLockedMessage() },
-                                    buttonSize: Layout.bottomButtonSize,
-                                    spacing: Layout.bottomButtonsSpacing,
-                                    horizontalPadding: Layout.bottomHorizontalPadding
-                                )
-                                .onChange(of: timeline.date) { _, newDate in
-                                    displayedSatisfaction = state.currentSatisfaction(now: newDate)
-                                    updateSatisfactionCountdown(now: newDate)
-                                    state.ensureDailyResetIfNeeded(now: newDate)
-
-                                    state.ensureBathNextSpawnScheduled(now: newDate)
-                                    state.ensureToiletNextSpawnScheduled(now: newDate)
-
-                                    maybeSpawnBathFlag(state: state, now: newDate)
-                                    maybeSpawnToiletFlag(state: state, now: newDate)
-
-                                    save()
-                                }
-                                .onAppear {
-                                    displayedSatisfaction = state.currentSatisfaction(now: now)
-                                    updateSatisfactionCountdown(now: now)
-                                    state.ensureDailyResetIfNeeded(now: now)
-
-                                    state.ensureBathNextSpawnScheduled(now: now)
-                                    state.ensureToiletNextSpawnScheduled(now: now)
-
-                                    maybeSpawnBathFlag(state: state, now: now)
-                                    maybeSpawnToiletFlag(state: state, now: now)
-
-                                    syncBathOverlayFromState(animated: false)
-                                    save()
-                                }
-                            }
-                            .padding(.bottom, Layout.bottomPadding)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                            .zIndex(Layout.zBottomButtons)
-                            .simultaneousGesture(
-                                TapGesture().onEnded {
-                                    if showFoodShelf { closeFoodShelf() }
-                                }
-                            )
-
                             if showMojaOverlay {
                                 ZStack {
                                     Color.black.opacity(0.001)
@@ -631,21 +554,105 @@ struct HomeView: View {
                         }
                     }
                 }
-            }
-            .overlay {
+
                 if showBathOverlay || hasBathFlag {
-                    GeometryReader { proxy in
-                        Image("yogore")
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: proxy.size.width, height: proxy.size.height)
-                            .clipped()
-                            .ignoresSafeArea()
-                            .opacity(bathOverlayOpacity)
-                            .allowsHitTesting(false)
-                    }
-                    .ignoresSafeArea()
+                    Color.clear
+                        .ignoresSafeArea()
+                        .overlay {
+                            Image("yogore")
+                                .resizable()
+                                .scaledToFill()
+                                .ignoresSafeArea()
+                                .opacity(bathOverlayOpacity)
+                                .allowsHitTesting(false)
+                        }
+                        .zIndex(Layout.zBathOverlay)
                 }
+            }
+            .overlay(alignment: .bottom) {
+                TimelineView(.periodic(from: Date(), by: Layout.careSpawnCheckInterval)) { timeline in
+                    let now = timeline.date
+
+                    let canFood = true
+                    let canBath = hasBathFlag
+                    let canWc = true
+
+                    BottomButtons(
+                        onBath: {
+                            if isToiletLocked {
+                                showToiletLockedMessage()
+                                return
+                            }
+                            onTapBath(state: state)
+                        },
+                        onFood: {
+                            if isToiletLocked {
+                                showToiletLockedMessage()
+                                return
+                            }
+                            onTapFood(state: state)
+                        },
+                        onWc: {
+                            onTapToilet(state: state)
+                        },
+                        onStep: {
+                            if isToiletLocked {
+                                showToiletLockedMessage()
+                                return
+                            }
+                            onTapStep()
+                        },
+                        isBathAvailable: canBath,
+                        isFoodAvailable: canFood,
+                        isWcAvailable: canWc,
+                        isToiletLocked: isToiletLocked,
+                        onBlocked: { showToiletLockedMessage() },
+                        buttonSize: Layout.bottomButtonSize,
+                        spacing: Layout.bottomButtonsSpacing,
+                        horizontalPadding: Layout.bottomHorizontalPadding
+                    )
+                    .onChange(of: timeline.date) { _, newDate in
+                        displayedSatisfaction = state.currentSatisfaction(now: newDate)
+                        updateSatisfactionCountdown(now: newDate)
+                        state.ensureDailyResetIfNeeded(now: newDate)
+
+                        state.ensureBathNextSpawnScheduled(now: newDate)
+                        state.ensureToiletNextSpawnScheduled(now: newDate)
+
+                        maybeSpawnBathFlag(state: state, now: newDate)
+                        maybeSpawnToiletFlag(state: state, now: newDate)
+
+                        save()
+                    }
+                    .onAppear {
+                        displayedSatisfaction = state.currentSatisfaction(now: now)
+                        updateSatisfactionCountdown(now: now)
+                        state.ensureDailyResetIfNeeded(now: now)
+
+                        state.ensureBathNextSpawnScheduled(now: now)
+                        state.ensureToiletNextSpawnScheduled(now: now)
+
+                        maybeSpawnBathFlag(state: state, now: now)
+                        maybeSpawnToiletFlag(state: state, now: now)
+
+                        syncBathOverlayFromState(animated: false)
+                        save()
+                    }
+                }
+                .padding(.bottom, Layout.bottomPadding)
+                .zIndex(Layout.zBottomButtons)
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        if showFoodShelf { closeFoodShelf() }
+                    }
+                )
+            }
+            .overlay(alignment: .top) {
+                AdBannerView(height: Layout.bannerHeight, maxBannerWidth: 320, contentHeight: 50, topOffset: 48)
+                    .frame(width: Layout.bannerWidthIPhone, height: Layout.bannerHeight)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Layout.bannerHeight)
+                    .zIndex(Layout.zBanner)
             }
             .navigationBarHidden(true)
         }
@@ -856,6 +863,15 @@ struct HomeView: View {
         }
         .onChange(of: state.bathFlagAt) { _, _ in
             syncBathOverlayFromState(animated: true)
+            updateWidgetSnapshot(forceReload: true)
+        }
+        .onChange(of: state.toiletNextSpawnAt) { _, _ in
+            updateWidgetSnapshot(forceReload: true)
+        }
+        .onChange(of: state.bathNextSpawnAt) { _, _ in
+            updateWidgetSnapshot(forceReload: true)
+        }
+        .onChange(of: state.lastDayKey) { _, _ in
             updateWidgetSnapshot(forceReload: true)
         }
     }
@@ -1573,7 +1589,7 @@ struct HomeView: View {
 
     private func updateWidgetSnapshot(forceReload: Bool = false) {
         let widgetState = state.makeWidgetStateSnapshot(todaySteps: widgetLinkedTodaySteps)
-        let changed = HomeWidgetBridge.save(widgetState: widgetState)
+        let changed = HomeWidgetBridge.save(widgetState: widgetState, state: state)
 
         #if canImport(WidgetKit)
         if forceReload || changed {
@@ -1719,24 +1735,74 @@ private enum HomeWidgetBridge {
     private static let bathFlagKey = "bathFlag"
     private static let currentPetIDKey = "currentPetID"
     private static let todayStepsKey = "todaySteps"
+
+    // ✅ アプリ未起動中でも Widget 側で状態判定できるように care 関連時刻も保存
+    private static let toiletFlagAtKey = "toiletFlagAt"
+    private static let bathFlagAtKey = "bathFlagAt"
+    private static let toiletNextSpawnAtKey = "toiletNextSpawnAt"
+    private static let bathNextSpawnAtKey = "bathNextSpawnAt"
+    private static let lastDayKeyKey = "lastDayKey"
+
     private static let lastSignatureKey = "homeWidgetLastSignature"
 
-    static func save(widgetState: AppState.WidgetStateSnapshot) -> Bool {
+    private static func unixSeconds(_ date: Date?) -> Int64? {
+        guard let date else { return nil }
+        return Int64(date.timeIntervalSince1970)
+    }
+
+    private static func write(_ value: Int64?, forKey key: String, defaults: UserDefaults) {
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    static func save(widgetState: AppState.WidgetStateSnapshot, state _: AppState) -> Bool {
         guard let defaults = UserDefaults(suiteName: appGroupID) else { return false }
 
         let normalizedPetID = widgetState.currentPetID.trimmingCharacters(in: .whitespacesAndNewlines)
         let safePetID = normalizedPetID.isEmpty ? "pet_000" : normalizedPetID
         let safeSteps = max(0, widgetState.todaySteps)
+        let safeLastDayKey = widgetState.lastDayKey.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let signature = "\(widgetState.toiletFlag)|\(widgetState.bathFlag)|\(safePetID)|\(safeSteps)"
+        let toiletFlagAt = unixSeconds(widgetState.toiletFlagAt)
+        let bathFlagAt = unixSeconds(widgetState.bathFlagAt)
+        let toiletNextSpawnAt = unixSeconds(widgetState.toiletNextSpawnAt)
+        let bathNextSpawnAt = unixSeconds(widgetState.bathNextSpawnAt)
+
+        let toiletFlagText = toiletFlagAt != nil ? String(toiletFlagAt!) : "nil"
+        let bathFlagText = bathFlagAt != nil ? String(bathFlagAt!) : "nil"
+        let toiletNextSpawnText = toiletNextSpawnAt != nil ? String(toiletNextSpawnAt!) : "nil"
+        let bathNextSpawnText = bathNextSpawnAt != nil ? String(bathNextSpawnAt!) : "nil"
+
+        let signatureParts: [String] = [
+            String(widgetState.toiletFlag),
+            String(widgetState.bathFlag),
+            safePetID,
+            String(safeSteps),
+            safeLastDayKey,
+            toiletFlagText,
+            bathFlagText,
+            toiletNextSpawnText,
+            bathNextSpawnText
+        ]
+        let signature = signatureParts.joined(separator: "|")
+
         let previousSignature = defaults.string(forKey: lastSignatureKey)
 
         defaults.set(widgetState.toiletFlag, forKey: toiletFlagKey)
         defaults.set(widgetState.bathFlag, forKey: bathFlagKey)
         defaults.set(safePetID, forKey: currentPetIDKey)
         defaults.set(safeSteps, forKey: todayStepsKey)
-        defaults.set(signature, forKey: lastSignatureKey)
 
+        defaults.set(safeLastDayKey, forKey: lastDayKeyKey)
+        write(toiletFlagAt, forKey: toiletFlagAtKey, defaults: defaults)
+        write(bathFlagAt, forKey: bathFlagAtKey, defaults: defaults)
+        write(toiletNextSpawnAt, forKey: toiletNextSpawnAtKey, defaults: defaults)
+        write(bathNextSpawnAt, forKey: bathNextSpawnAtKey, defaults: defaults)
+
+        defaults.set(signature, forKey: lastSignatureKey)
         defaults.synchronize()
 
         return previousSignature != signature
