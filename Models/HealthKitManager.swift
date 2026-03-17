@@ -41,6 +41,11 @@ final class HealthKitManager: ObservableObject {
     private var lastGoodBasalKcal: Int = 0
     private var lastGoodTotalKcal: Int = 0
 
+    // ✅ 追加：歩数更新監視
+    private var stepObserverQuery: HKObserverQuery?
+    private var isStepObservationStarted: Bool = false
+    private var isRefreshingTodaySteps: Bool = false
+
     private var readTypes: Set<HKObjectType> {
         var types: Set<HKObjectType> = []
         if let steps = HKObjectType.quantityType(forIdentifier: .stepCount) { types.insert(steps) }
@@ -60,9 +65,80 @@ final class HealthKitManager: ObservableObject {
         do {
             try await store.requestAuthorization(toShare: [], read: readTypes)
             authState = .authorized
+
+            // ✅ 許可取得後に歩数監視を開始
+            await startStepUpdatesIfNeeded()
+            await refreshTodayStepsForWidget()
         } catch {
             authState = .denied
             errorMessage = "HealthKitの許可取得に失敗: \(error.localizedDescription)"
+        }
+    }
+
+    /// ✅ 追加：Widget 用に今日の歩数を即時更新
+    func refreshTodayStepsForWidget(now: Date = Date()) async {
+        guard authState == .authorized else { return }
+        guard !isRefreshingTodaySteps else { return }
+
+        isRefreshingTodaySteps = true
+        defer { isRefreshingTodaySteps = false }
+
+        _ = await fetchTodayStepTotal(now: now)
+    }
+
+    /// ✅ 追加：歩数の変更監視を開始
+    func startStepUpdatesIfNeeded() async {
+        guard authState == .authorized else { return }
+        guard !isStepObservationStarted else { return }
+        guard let stepType = HKObjectType.quantityType(forIdentifier: .stepCount) else { return }
+
+        let query = HKObserverQuery(sampleType: stepType, predicate: nil) { [weak self] _, completionHandler, error in
+            defer { completionHandler() }
+
+            guard let self else { return }
+
+            if let error {
+                Task { @MainActor in
+                    self.errorMessage = "歩数監視に失敗: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            Task { @MainActor in
+                await self.refreshTodayStepsForWidget()
+            }
+        }
+
+        stepObserverQuery = query
+        store.execute(query)
+        isStepObservationStarted = true
+
+        do {
+            try await enableBackgroundDelivery(for: stepType)
+        } catch {
+            errorMessage = "歩数のバックグラウンド更新設定に失敗: \(error.localizedDescription)"
+        }
+    }
+
+    /// ✅ 追加：HKHealthStore のコールバックAPIを async 化
+    private func enableBackgroundDelivery(for type: HKQuantityType) async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            store.enableBackgroundDelivery(for: type, frequency: .immediate) { success, error in
+                if let error {
+                    cont.resume(throwing: error)
+                    return
+                }
+
+                if success {
+                    cont.resume(returning: ())
+                } else {
+                    cont.resume(throwing: NSError(
+                        domain: "HealthKitManager",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "歩数のバックグラウンド更新を有効化できませんでした。"]
+                    ))
+                }
+            }
         }
     }
 
@@ -123,7 +199,7 @@ final class HealthKitManager: ObservableObject {
             if protectedBasal > 0 { lastGoodBasalKcal = protectedBasal }
             if protectedTotal > 0 { lastGoodTotalKcal = protectedTotal }
 
-            // ✅ 追加：歩数だけでも Widget へ早めに反映
+            // ✅ 歩数だけでも Widget へ早めに反映
             pushTodayStepsToWidgetIfNeeded(protectedSteps)
 
             return (max(0, totalDelta), now)
@@ -224,7 +300,7 @@ final class HealthKitManager: ObservableObject {
             lastGoodSteps = protectedSteps
         }
 
-        // ✅ 追加：StepEnjoy 系の取得でも Widget 側へ反映
+        // ✅ StepEnjoy 系の取得でも Widget 側へ反映
         pushTodayStepsToWidgetIfNeeded(protectedSteps)
 
         return protectedSteps

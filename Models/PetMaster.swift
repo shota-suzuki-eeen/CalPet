@@ -16,8 +16,9 @@ struct PetMasterItem: Identifiable, Codable, Equatable {
 
     // 将来的に「好物/大好物」倍率を入れる可能性があるので枠だけ用意（現状ロジック未使用）
     // 既存の .init(id:name:personality:) を壊さないためデフォルト値を付与
-    let favoriteFoodKind: FoodKind? = nil
-    let superFavoriteFoodKind: FoodKind? = nil
+    // Codable 警告回避のため let + 初期値 ではなく var にする
+    var favoriteFoodKind: FoodKind? = nil
+    var superFavoriteFoodKind: FoodKind? = nil
 }
 
 // MARK: - Care / Friendship (Spec v6)

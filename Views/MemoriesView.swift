@@ -490,7 +490,7 @@ struct MemoriesView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            guard let entry else { return }
+            guard entry != nil else { return }
             bgmManager.playSE(.push)
             sheetItem = DayPhotosSheetItem(
                 dayKey: key,

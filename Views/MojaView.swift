@@ -146,7 +146,7 @@ struct MojaView: View {
                                 .scaledToFit()
                                 .frame(width: 20, height: 20)
 
-                            Text("をまとめる")
+                            Text("をまとめる（x5 消費）")
                                 .font(.headline)
                         }
                     }
@@ -215,14 +215,6 @@ struct MojaView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.opacity)
             }
-
-            // ✅ 画面遷移用（隠し NavigationLink）
-            NavigationLink(isActive: $navigateToZukan) {
-                ZukanView()
-            } label: {
-                EmptyView()
-            }
-            .hidden()
         }
         // ✅ 背景画像は「後ろに描画」するだけ（中身のレイアウトに干渉しにくい）
         .background(
@@ -238,7 +230,9 @@ struct MojaView: View {
         )
         .navigationTitle("もじゃ合わせ")
         .navigationBarTitleDisplayMode(.inline)
-
+        .navigationDestination(isPresented: $navigateToZukan) {
+            ZukanView()
+        }
         .onAppear {
             state.ensureDailyResetIfNeeded(now: Date())
             state.ensureInitialPetsIfNeeded()

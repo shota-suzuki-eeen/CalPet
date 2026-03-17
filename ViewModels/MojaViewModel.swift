@@ -36,8 +36,8 @@ final class MojaViewModel: ObservableObject {
 
     // MARK: - Constants
 
-    /// デモ用：1個消費（将来調整）
-    let fusionCost: Int = 1
+    /// もじゃ合わせに必要な消費数
+    let fusionCost: Int = 5
 
     /// 6時間
     private let fusionDuration: TimeInterval = 6 * 60 * 60
@@ -99,12 +99,6 @@ final class MojaViewModel: ObservableObject {
 
     /// View の onAppear で呼ぶ想定
     func onAppearPrepareDemoIfNeeded() {
-        // デモ用：初回だけ1個配布（不要なら削除OK）
-        if mojaCount <= 0 && fusionIsRunning == false && fusionIsReadyToClaim == false {
-            mojaCount = 1
-            persistMojaCount()
-        }
-
         // ✅ 進行中ならTicker復帰（念のため）
         if fusionIsRunning {
             startTickerIfNeeded()

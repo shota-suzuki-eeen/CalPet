@@ -125,6 +125,13 @@ private extension UIApplication {
         return window?.rootViewController
     }
 
+    static func activeScreen() -> UIScreen? {
+        let scenes = UIApplication.shared.connectedScenes
+        let windowScene = scenes.first { $0.activationState == .foregroundActive } as? UIWindowScene
+        let window = windowScene?.windows.first { $0.isKeyWindow }
+        return window?.windowScene?.screen ?? windowScene?.screen
+    }
+
     func topMostViewController(base: UIViewController? = nil) -> UIViewController? {
         let baseVC: UIViewController? = {
             if let base { return base }
@@ -224,8 +231,9 @@ struct BannerArea: View {
     }
 
     private func normalizeBannerWidth(_ rawW: CGFloat) -> CGFloat {
-        let screenW = UIScreen.main.bounds.width
-        let scale = UIScreen.main.scale
+        let screen = UIApplication.activeScreen()
+        let screenW = screen?.bounds.width ?? rawW
+        let scale = screen?.scale ?? 1.0
 
         var w = maxWidth.map { min(rawW, $0) } ?? rawW
         w = min(w, screenW)
@@ -273,15 +281,17 @@ final class RewardedAdManager: ObservableObject {
         RewardedAd.load(with: adUnitID, request: Request()) { [weak self] ad, error in
             guard let self else { return }
 
-            if let error {
-                self.lastErrorMessage = error.localizedDescription
-                self.isReady = false
-                self.rewardedAd = nil
-                return
-            }
+            Task { @MainActor in
+                if let error {
+                    self.lastErrorMessage = error.localizedDescription
+                    self.isReady = false
+                    self.rewardedAd = nil
+                    return
+                }
 
-            self.rewardedAd = ad
-            self.isReady = (ad != nil)
+                self.rewardedAd = ad
+                self.isReady = (ad != nil)
+            }
         }
     }
 
@@ -351,16 +361,18 @@ final class InterstitialAdManager: NSObject, ObservableObject {
         InterstitialAd.load(with: adUnitID, request: Request()) { [weak self] ad, error in
             guard let self else { return }
 
-            if let error {
-                self.lastErrorMessage = error.localizedDescription
-                self.isReady = false
-                self.interstitialAd = nil
-                return
-            }
+            Task { @MainActor in
+                if let error {
+                    self.lastErrorMessage = error.localizedDescription
+                    self.isReady = false
+                    self.interstitialAd = nil
+                    return
+                }
 
-            self.interstitialAd = ad
-            self.interstitialAd?.fullScreenContentDelegate = self
-            self.isReady = (ad != nil)
+                self.interstitialAd = ad
+                self.interstitialAd?.fullScreenContentDelegate = self
+                self.isReady = (ad != nil)
+            }
         }
     }
 
@@ -397,6 +409,7 @@ final class InterstitialAdManager: NSObject, ObservableObject {
 // MARK: - GADFullScreenContentDelegate
 
 extension InterstitialAdManager: FullScreenContentDelegate {
+    @MainActor
     func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
         let callback = onDismiss
         onDismiss = nil
@@ -405,6 +418,7 @@ extension InterstitialAdManager: FullScreenContentDelegate {
         load()
     }
 
+    @MainActor
     func ad(_ ad: FullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
         lastErrorMessage = error.localizedDescription
 

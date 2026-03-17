@@ -132,13 +132,18 @@ final class MemoriesViewModel: ObservableObject {
     }
 
     private func loadImageIfNeeded(cacheKey: String, fileName: String) {
-        if let _ = cachedImage(for: cacheKey) { return }
+        if cachedImage(for: cacheKey) != nil { return }
 
         if loadingKeys.contains(cacheKey) { return }
         loadingKeys.insert(cacheKey)
 
-        Task.detached(priority: .utility) {
-            let img = TodayPhotoStorage.loadImage(fileName: fileName)
+        Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+
+            // ✅ TodayPhotoStorage.loadImage(fileName:) が MainActor 隔離でも警告が出ないようにする
+            let img = await MainActor.run {
+                TodayPhotoStorage.loadImage(fileName: fileName)
+            }
 
             await MainActor.run {
                 self.loadingKeys.remove(cacheKey)

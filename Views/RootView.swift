@@ -52,12 +52,23 @@ struct RootView: View {
                 hk: hk,
                 bgmManager: bgmManager
             )
+
+            if hk.authState == .authorized {
+                await hk.startStepUpdatesIfNeeded()
+                await hk.refreshTodayStepsForWidget()
+            }
         }
-        .onChange(of: scenePhase) { newPhase in
+        .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
                 // ✅ 復帰時に再生が止まっていたら再開
                 bgmManager.startIfNeeded()
+
+                // ✅ 復帰時に歩数監視を再確認し、Widget 用の歩数も更新
+                Task {
+                    await hk.startStepUpdatesIfNeeded()
+                    await hk.refreshTodayStepsForWidget()
+                }
 
             case .background:
                 // ✅ 常時再生したい場合でも、ここで止めない（仕様：無限ループ再生）
