@@ -23,10 +23,6 @@ struct MojaView: View {
     // ✅ 「いますぐ確認」→ 図鑑へ遷移
     @State private var navigateToZukan: Bool = false
 
-    private var isAdShortenButton: Bool {
-        viewModel.fusionIsRunning && !viewModel.fusionIsReadyToClaim
-    }
-
     /// ✅ 未開始時の押下可否
     private var canStartFusion: Bool {
         viewModel.canStartFusion(state: state)
@@ -193,7 +189,6 @@ struct MojaView: View {
                         withAnimation(.easeOut(duration: 0.15)) {
                             viewModel.showRewardPopup = false
                         }
-                        // ✅ 図鑑へ
                         navigateToZukan = true
                     }
                 )
@@ -216,7 +211,6 @@ struct MojaView: View {
                 .transition(.opacity)
             }
         }
-        // ✅ 背景画像は「後ろに描画」するだけ（中身のレイアウトに干渉しにくい）
         .background(
             ZStack {
                 Image("Moja_background")
@@ -236,16 +230,25 @@ struct MojaView: View {
         .onAppear {
             state.ensureDailyResetIfNeeded(now: Date())
             state.ensureInitialPetsIfNeeded()
-            viewModel.onAppearPrepareDemoIfNeeded()
+
+            // ✅ AppState を正本として mojaCount を同期
+            viewModel.onAppearPrepareDemoIfNeeded(state: state)
+
             save()
 
             // ✅ リワード広告を事前ロード
             rewardedAd.load()
         }
+        .onChange(of: state.mojaCount) { _, _ in
+            // ✅ HomeView 側で増えた moja をこの画面にも即反映
+            viewModel.syncMojaCount(from: state)
+        }
     }
 
     private func save() {
-        do { try modelContext.save() } catch { }
+        do {
+            try modelContext.save()
+        } catch { }
     }
 }
 
@@ -256,7 +259,6 @@ private struct RewardPopup: View {
 
     var body: some View {
         ZStack {
-            // 背景暗幕
             Color.black.opacity(0.45)
                 .ignoresSafeArea()
                 .onTapGesture {

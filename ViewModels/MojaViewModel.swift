@@ -42,9 +42,6 @@ final class MojaViewModel: ObservableObject {
     /// 6時間
     private let fusionDuration: TimeInterval = 6 * 60 * 60
 
-    /// ✅ リワード（広告視聴）で短縮する時間：3時間
-    private let rewardReductionSeconds: TimeInterval = 3 * 60 * 60
-
     /// 画像切り替え（仕様：moja → A → B → C → moja...）
     let fusionFrameAssetNames: [String] = [
         "moja",
@@ -53,7 +50,7 @@ final class MojaViewModel: ObservableObject {
         "moja_fusionC"
     ]
 
-    // ✅ 1秒Ticker（安定化：TimerではなくTaskで回す）
+    /// ✅ 1秒Ticker（安定化：TimerではなくTaskで回す）
     private var tickerTask: Task<Void, Never>?
 
     // MARK: - Storage Keys
@@ -83,80 +80,46 @@ final class MojaViewModel: ObservableObject {
         tickerTask?.cancel()
     }
 
-    // MARK: - Public (Computed)
-
-    /// ✅ ボタン無効条件をまとめる（Viewの記述を壊さず読みやすく）
-    var isActionButtonDisabled: Bool {
-        // 受け取り待ちは常に押せる
-        if fusionIsReadyToClaim { return false }
-        // 進行中は押せない（※ただしView側で「短縮ボタン」に切り替える想定）
-        if fusionIsRunning { return true }
-        // もじゃ不足は押せない
-        return mojaCount < fusionCost
-    }
-
     // MARK: - Public API
 
     /// View の onAppear で呼ぶ想定
-    func onAppearPrepareDemoIfNeeded() {
-        // ✅ 進行中ならTicker復帰（念のため）
+    /// - AppState 側で獲得した mojaCount を MojaView に反映する
+    func onAppearPrepareDemoIfNeeded(state: AppState) {
+        syncMojaCount(from: state)
+
         if fusionIsRunning {
             startTickerIfNeeded()
         }
     }
 
-    /// （互換用）1秒ごとに呼ぶ想定だったが、安定化のため内部Task運用へ
-    /// 既存コードを壊さないため残す（呼ばれても害はない）
-    func tick(now: Date, state: AppState) {
-        // Task運用に寄せたので基本は何もしない
-        // ただし、呼ばれたなら完了判定だけはしておく
-        syncFusionIfNeeded(now: now)
+    /// ✅ AppState を正本として mojaCount を同期
+    func syncMojaCount(from state: AppState) {
+        let safeCount = max(0, state.mojaCount)
+        if mojaCount != safeCount {
+            mojaCount = safeCount
+        }
+
+        // 既存の保存方式を壊さないため、UserDefaults にも反映
+        persistMojaCount()
     }
 
     /// ✅ 開始可能判定
-    /// - 仕様変更:
-    ///   - 全キャラ所持でも「ボタンは押せる」ため、
-    ///     ここでは未所持キャラの有無は見ない
+    /// - 全キャラ所持でも「ボタンは押せる」ため、
+    ///   ここでは未所持キャラの有無は見ない
     func canStartFusion(state: AppState) -> Bool {
+        syncMojaCount(from: state)
+
         if fusionIsRunning { return false }
         if fusionIsReadyToClaim { return false }
         if mojaCount < fusionCost { return false }
         return true
     }
 
-    /// 「もじゃをまとめる」押下（旧互換用）
-    /// - 注意: 既存呼び出しを壊さないため残している
-    /// - 最新仕様では `startFusion(now:state:)` を使用すること
-    func startFusion(now: Date) {
-        guard fusionIsRunning == false else { return }
-        guard fusionIsReadyToClaim == false else { return }
-
-        guard mojaCount >= fusionCost else {
-            toastCenter("もじゃが足りない…")
-            return
-        }
-
-        mojaCount -= fusionCost
-        persistMojaCount()
-
-        fusionIsRunning = true
-        fusionIsReadyToClaim = false
-        fusionFrameIndex = 0
-
-        let end = now.addingTimeInterval(fusionDuration)
-        fusionEndAt = end
-
-        persistFusionProgress()
-
-        toastCenter("もじゃがまとまり始めた！")
-
-        // ✅ ここでTicker開始
-        startTickerIfNeeded()
-    }
-
-    /// ✅ 「もじゃをまとめる」押下（最新仕様）
+    /// ✅ 「もじゃをまとめる」押下
     /// - 全キャラ所持時は融合開始せず、中央トーストだけ表示
     func startFusion(now: Date, state: AppState) {
+        syncMojaCount(from: state)
+
         guard fusionIsRunning == false else { return }
         guard fusionIsReadyToClaim == false else { return }
 
@@ -175,8 +138,14 @@ final class MojaViewModel: ObservableObject {
             return
         }
 
-        mojaCount -= fusionCost
-        persistMojaCount()
+        guard state.consumeMoja(fusionCost) else {
+            syncMojaCount(from: state)
+            toastCenter("もじゃが足りない…")
+            return
+        }
+
+        // ✅ 消費後は AppState を正本として ViewModel 側へ反映
+        syncMojaCount(from: state)
 
         fusionIsRunning = true
         fusionIsReadyToClaim = false
@@ -219,18 +188,13 @@ final class MojaViewModel: ObservableObject {
 
         // ✅ アセット画像・ボタンを最初の状態に戻す（= 進行も受け取り待ちも解除）
         resetFusionToIdle()
+
+        // ✅ 表示用カウントも再同期
+        syncMojaCount(from: state)
     }
 
-    // MARK: - ✅ Reward (Ad) API
-
-    /// ✅ Reward_moja の視聴が「完了した後」に View から呼ぶ想定
-    /// - 仕様：タイマー稼働中に視聴で3時間短縮
-    func applyRewardReduction3Hours(now: Date, state: AppState) {
-        applyAdReduction(seconds: rewardReductionSeconds, now: now, state: state)
-    }
-
-    /// 「広告視聴で時間を短縮」押下（汎用：指定秒数だけ短縮）
-    /// - ※広告の表示は View 側で行い、視聴完了時にこのメソッドを呼ぶ
+    /// 「広告視聴で時間を短縮」押下（指定秒数だけ短縮）
+    /// - 広告の表示は View 側で行い、視聴完了時にこのメソッドを呼ぶ
     func applyAdReduction(seconds: TimeInterval, now: Date, state: AppState) {
         guard fusionIsRunning else { return }
         guard fusionIsReadyToClaim == false else { return }
@@ -247,11 +211,14 @@ final class MojaViewModel: ObservableObject {
 
         // 直後に0判定
         syncFusionIfNeeded(now: now)
+
+        // ✅ 念のためカウント同期
+        syncMojaCount(from: state)
     }
 
     // MARK: - View helpers
 
-    /// ✅ 現在表示するアセット名（View側で使ってOK）
+    /// ✅ 現在表示するアセット名
     /// - 仕様：カウント0になったら CalPet_secret で固定
     func currentFusionAssetName() -> String {
         if fusionIsReadyToClaim {
@@ -276,7 +243,6 @@ final class MojaViewModel: ObservableObject {
             return formattedRemaining(now: now)
         }
 
-        // 未開始時の固定表示（従来互換）
         return "06:00:00"
     }
 
@@ -336,7 +302,6 @@ final class MojaViewModel: ObservableObject {
         guard fusionIsRunning, let end = fusionEndAt else { return }
 
         if now >= end {
-            // ✅ 完了：ここでは「獲得」はしない（受け取り待ちにする）
             fusionIsRunning = false
             fusionEndAt = nil
             fusionFrameIndex = 0

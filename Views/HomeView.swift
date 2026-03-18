@@ -66,7 +66,7 @@ struct HomeView: View {
     // ✅ Home表示中か（ショップ滞在中に onChange が走っても演出しない）
     @State private var isHomeVisible: Bool = false
 
-    // ✅ MAX到達時 “もじゃ” 演出（旧: チケット）
+    // ✅ MAX到達時 “もじゃ” 演出
     @State private var showMojaOverlay: Bool = false
     @State private var rewardScale: CGFloat = 0.8
     @State private var rewardOpacity: Double = 0.0
@@ -1350,6 +1350,14 @@ struct HomeView: View {
         let beforeDisplayed = displayedFriendship
 
         let result = state.addFriendship(points: points, maxMeter: maxMeter)
+
+        // ✅ 仕様変更:
+        // なかよし度MAX到達時に獲得した分の「もじゃ」を AppState に反映する
+        let gainedMoja = max(0, result.gainedCards)
+        if gainedMoja > 0 {
+            state.addMoja(gainedMoja)
+        }
+
         save()
 
         let after = result.afterPoint
